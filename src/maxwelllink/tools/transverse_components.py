@@ -267,14 +267,14 @@ def calc_transverse_components_cylindrical(
     size=(20, 20, 20), dx=1.0, sigma=1.0, mu12=0.10, local_size=100
 ):
     """
-    Calculate the transverse polarization kernel of an on-axis z-oriented dipole 
+    Calculate the transverse polarization kernel of an on-axis z-oriented dipole
     on the cylindrical (r, z) half-plane.
 
     By azimuthal symmetry the kernel of a z dipole has only radial and axial
     components, which equal the x- and z-components of the 3D transverse
-    kernel on the y = 0 plane: 
-    ``Pr_t(r, z) = Px_t(x=r, y=0, z)`` and ``Pz_t(r, z) = Pz_t(x=r, y=0, z)``. 
-    
+    kernel on the y = 0 plane:
+    ``Pr_t(r, z) = Px_t(x=r, y=0, z)`` and ``Pz_t(r, z) = Pz_t(x=r, y=0, z)``.
+
     Hence, we simply reuse the cached 3D computation at y = 0 for the cylindrical case.
 
     Parameters

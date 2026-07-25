@@ -13,7 +13,7 @@ from contextlib import contextmanager
 
 import numpy as np
 
-# house colors for publication-ready plots, adapted from group's previous columnplot style 
+# house colors for publication-ready plots, adapted from group's previous columnplot style
 # (https://github.com/TaoELi/columnplots).
 PLOT_COLORS = {
     "red": "#EA4E34",
@@ -106,7 +106,7 @@ def polish_axes(ax, xlabel=None, ylabel=None, despine=False):
 def draw_optical_planes(cavity, ax, in_nm=True):
     """
     Draw the excitation and detector planes of ``cavity.optical_setup()`` as
-    labeled vertical lines. 
+    labeled vertical lines.
 
     Parameters
     ----------
@@ -278,7 +278,7 @@ def plot_cavity_1d(cavity, ax=None):
 
 def plot_cavity_2d(cavity, ax=None, **kwargs):
     """
-    Draw the plan view of a cavity via ``mp.Simulation.plot2D`` (2D, 3D, and cylindrical cells). 
+    Draw the plan view of a cavity via ``mp.Simulation.plot2D`` (2D, 3D, and cylindrical cells).
     In 3D the default view is the x-z plane through the cell center (override with ``output_plane=``).
 
     Parameters
