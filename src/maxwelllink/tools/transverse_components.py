@@ -10,6 +10,7 @@ Evaluating the transverse components of a Gaussian polarization distribution in 
 """
 
 import numpy as np
+from scipy.integrate import trapezoid
 
 transverse_component_dir = {}
 
@@ -260,3 +261,72 @@ def calc_transverse_components_3d(
     result = comm.bcast(result, root=0)
     transverse_component_dir[key] = result
     return result
+
+
+def calc_transverse_components_cylindrical(
+    size=(20, 20, 20), dx=1.0, sigma=1.0, mu12=0.10, local_size=100
+):
+    """
+    Calculate the transverse polarization kernel of an on-axis z-oriented dipole 
+    on the cylindrical (r, z) half-plane.
+
+    By azimuthal symmetry the kernel of a z dipole has only radial and axial
+    components, which equal the x- and z-components of the 3D transverse
+    kernel on the y = 0 plane: 
+    ``Pr_t(r, z) = Px_t(x=r, y=0, z)`` and ``Pz_t(r, z) = Pz_t(x=r, y=0, z)``. 
+    
+    Hence, we simply reuse the cached 3D computation at y = 0 for the cylindrical case.
+
+    Parameters
+    ----------
+    size : tuple of float of length 3
+        The 3D kernel box ``(Lx, Ly, Lz)``; cylindrical callers pass
+        ``(L, L, Lz)`` for a molecule of transverse extent ``L`` (the slice
+        assumes ``Lx == Ly``).
+    dx : float
+        The spatial resolution (grid spacing) = 1 / resolution.
+    sigma : float
+        The width of the Gaussian distribution.
+    mu12 : float
+        The transition dipole moment scaling factor.
+    local_size : float
+        The size of the local box for FFT calculations.
+
+    Returns
+    -------
+    tuple
+        ``(r, z, Pr_t, Pz_t)``: half-plane coordinates relative to the
+        kernel center (``r >= 0``) and the real 2D kernel tables of shape
+        ``(r.size, z.size)``.
+    """
+
+    _, px_t, _, pz_t = calc_transverse_components_3d(
+        size=size,
+        dx=dx,
+        sigma=sigma,
+        mu12=mu12,
+        local_size=local_size,
+        component="z",
+    )
+    # coordinates of the cropped box, rebuilt exactly as in the 3D routine;
+    # note np.meshgrid's default 'xy' indexing there: array axes are
+    # (y, x, z), so the y = 0 slice is along axis 0 and r = x along axis 1
+    full = np.arange(-local_size / 2.0, local_size / 2.0, dx)
+    start_x = int((local_size - size[0]) / 2 / dx)
+    start_y = int((local_size - size[1]) / 2 / dx)
+    start_z = int((local_size - size[2]) / 2 / dx)
+    x = full[start_x : start_x + px_t.shape[1]]
+    y = full[start_y : start_y + px_t.shape[0]]
+    z = full[start_z : start_z + px_t.shape[2]]
+    i0 = int(np.argmin(np.abs(x)))  # the axis (x = r = 0)
+    j0 = int(np.argmin(np.abs(y)))  # the y = 0 plane
+    r = x[i0:]
+    pr_t = np.real(px_t[j0, i0:, :]).copy()
+    pz_t = np.real(pz_t[j0, i0:, :]).copy()
+
+    # The parent 3D table is normalized with a Cartesian dx^3 sum. Reapply
+    # the same axial-dipole normalization after taking the cylindrical slice.
+    norm = 2.0 * np.pi * trapezoid(trapezoid(r[:, None] * pz_t, z, axis=1), r)
+    pr_t *= mu12 / norm
+    pz_t *= mu12 / norm
+    return r, z, pr_t, pz_t
