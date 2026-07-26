@@ -74,9 +74,11 @@ class Molecule:
         driver : str or None, optional
             Driver name for non-socket mode. If provided, ``hub`` must be ``None``.
         center : Vector3 or None, optional
-            Molecule center position.
+            Molecule center position in Cartesian coordinates ``(x, y, z)``.
+            Cylindrical ``m = 0`` coupling requires ``x = y = 0``.
         size : Vector3 or None, optional
-            Molecule size (extent).
+            Full Cartesian molecule extents ``(Lx, Ly, Lz)``. Cylindrical
+            ``m = 0`` coupling requires ``Lx = Ly``.
         dimensions : int or None, optional
             Simulation dimensionality; one of ``1``, ``2``, ``3``, or ``-2``
             (``meep.CYLINDRICAL``, an m = 0 cylindrical cell with the molecule on the axis and its dipole along z).

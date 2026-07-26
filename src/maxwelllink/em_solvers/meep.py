@@ -496,16 +496,24 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
             )
 
         # Cylindrical cells couple an on-axis, z-oriented molecule only.
+        # Molecule center/size are public Cartesian quantities; convert only
+        # the wrapper size to Meep's native (r, phi, z) representation.
         if self.dimensions == mp.CYLINDRICAL:
             if self.polarization_type not in ("analytical", "transverse"):
                 raise ValueError(
                     "Cylindrical (m = 0) cells currently support 'analytical' and 'transverse' polarization_type only."
                 )
-            if abs(self.center.x) > 1.0e-9:
+            if abs(self.center.x) > 1.0e-9 or abs(self.center.y) > 1.0e-9:
                 raise ValueError(
-                    "Cylindrical (m = 0) cells require the molecule on the axis "
-                    "(center r = 0)"
+                    "Cylindrical (m = 0) coupling requires a Cartesian molecule "
+                    "center on the z axis (center.x = center.y = 0)."
                 )
+            if not np.isclose(self.size.x, self.size.y, rtol=0.0, atol=1.0e-9):
+                raise ValueError(
+                    "Cylindrical (m = 0) coupling requires an axisymmetric "
+                    "Cartesian molecule size (size.x = size.y)."
+                )
+            self.size = mp.Vector3(self.size.x, 0.0, self.size.z)
 
         self._polarization_prefactor_3d = (
             1.0 / (2.0 * np.pi) ** 1.5 / self.sigma**5 * self.rescaling_factor
