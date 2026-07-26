@@ -78,7 +78,8 @@ class Molecule:
         size : Vector3 or None, optional
             Molecule size (extent).
         dimensions : int or None, optional
-            Simulation dimensionality; one of ``1``, ``2``, or ``3``.
+            Simulation dimensionality; one of ``1``, ``2``, ``3``, or ``-2``
+            (``meep.CYLINDRICAL``, an m = 0 cylindrical cell with the molecule on the axis and its dipole along z).
         sigma : float or list or None, optional
             Spatial polarization kernel width.
         resolution : int or None, optional
@@ -151,8 +152,11 @@ class Molecule:
         # before closing the simulation, we would like to process the raw data into a more compact form
         self.extra = {}
 
-        if self.dimensions not in (1, 2, 3) and self.dimensions is not None:
-            raise ValueError("Molecule only supports 1D, 2D and 3D simulations.")
+        # -2 is meep.CYLINDRICAL (not imported here: this layer stays EM-agnostic)
+        if self.dimensions not in (1, 2, 3, -2) and self.dimensions is not None:
+            raise ValueError(
+                "Molecule only supports 1D, 2D, 3D, and cylindrical simulations."
+            )
 
         # identify the spatial polarization kernel function
         if self.size is None:

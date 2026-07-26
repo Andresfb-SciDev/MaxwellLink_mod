@@ -23,7 +23,11 @@ from ..sockets import SocketHub
 from .dummy_em import DummyEMUnits, MoleculeDummyWrapper
 from ..molecule import Molecule, Vector3
 from ..units import EV_TO_CM_INV, FS_TO_AU
-from maxwelllink.tools import calc_transverse_components_3d, project_transverse_field_3d
+from ..tools.transverse_components import (
+    calc_transverse_components_3d,
+    calc_transverse_components_cylindrical,
+    project_transverse_field_3d,
+)
 
 try:
     import meep as mp
@@ -138,6 +142,46 @@ def _transverse_source_key(fingerprint_hash, field_tag, molecule_axis):
     return (fingerprint_hash, "transverse", field_tag, molecule_axis)
 
 
+def _make_cylindrical_kernel_function(radius_grid, axial_grid, kernel_values):
+    """
+    Return a smooth function over a cylindrical kernel table.
+
+    The returned function evaluates the kernel at ``(radius, axial_offset)``
+    and returns zero outside the tabulated domain.
+
+    Parameters
+    ----------
+    radius_grid, axial_grid : numpy.ndarray
+        Radial and axial coordinates relative to the kernel center.
+    kernel_values : numpy.ndarray
+        Real kernel values of shape
+        ``(radius_grid.size, axial_grid.size)``.
+    """
+
+    from scipy.interpolate import RectBivariateSpline
+
+    spline = RectBivariateSpline(
+        radius_grid,
+        axial_grid,
+        kernel_values,
+        kx=min(3, radius_grid.size - 1),
+        ky=min(3, axial_grid.size - 1),
+        s=0,
+    )
+
+    def evaluate_kernel(radius, axial_offset):
+        if (
+            radius < radius_grid[0]
+            or radius > radius_grid[-1]
+            or axial_offset < axial_grid[0]
+            or axial_offset > axial_grid[-1]
+        ):
+            return 0.0
+        return float(spline.ev(radius, axial_offset))
+
+    return evaluate_kernel
+
+
 def _accumulate_source_amplitudes(m, amp_mu, touched):
     """
     Add one molecule's current amplitudes to the Meep source accumulators.
@@ -171,7 +215,18 @@ def _accumulate_source_amplitudes(m, amp_mu, touched):
             touched.add(key)
         instantaneous_source_amplitudes[key] += float(val)
 
-    if m.dimensions in (1, 2):
+    if m.dimensions == mp.CYLINDRICAL:
+        # currently only z-dipole of molecules is coupled in cylindrical cells (m=0)
+        if m.polarization_type == "transverse":
+            # both Er and Ez components are needed for the transverse Pz kernel
+            for field_tag in ("Er", "Ez"):
+                key = _transverse_source_key(
+                    m.polarization_fingerprint_hash, field_tag, "z"
+                )
+                add(key, amp_mu[2])
+        else:
+            add((m.polarization_fingerprint_hash, "Ez"), amp_mu[2])
+    elif m.dimensions in (1, 2):
         add((m.polarization_fingerprint_hash, "Ez"), amp_mu[2])
     elif m.polarization_type == "transverse":
         for molecule_axis, val in (
@@ -440,6 +495,18 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
                 "###! Please consider using 'analytical', 'numerical' or 'transverse' polarization_type with a small sigma instead. !###",
             )
 
+        # Cylindrical cells couple an on-axis, z-oriented molecule only.
+        if self.dimensions == mp.CYLINDRICAL:
+            if self.polarization_type not in ("analytical", "transverse"):
+                raise ValueError(
+                    "Cylindrical (m = 0) cells currently support 'analytical' and 'transverse' polarization_type only."
+                )
+            if abs(self.center.x) > 1.0e-9:
+                raise ValueError(
+                    "Cylindrical (m = 0) cells require the molecule on the axis "
+                    "(center r = 0)"
+                )
+
         self._polarization_prefactor_3d = (
             1.0 / (2.0 * np.pi) ** 1.5 / self.sigma**5 * self.rescaling_factor
         )
@@ -566,6 +633,20 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
                     size=size,
                     amplitude=1.0,
                     amp_func=amp_func_2d,
+                )
+            srcs.append(_fingerprint_source[key])
+        elif self.dimensions == mp.CYLINDRICAL:
+            # m = 0: only the z-oriented dipole needed
+            key = (self.polarization_fingerprint_hash, "Ez")
+            if key not in _fingerprint_source:
+                instantaneous_source_amplitudes[key] = 0.0
+                _fingerprint_source[key] = mp.Source(
+                    src=_make_custom_time_src(key),
+                    component=mp.Ez,
+                    center=center,
+                    size=size,
+                    amplitude=1.0,
+                    amp_func=amp_func_3d_z,
                 )
             srcs.append(_fingerprint_source[key])
         else:  # 3D
@@ -700,6 +781,39 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
 
         self.sources = srcs
 
+    def _get_cylindrical_transverse_kernel(self):
+        """
+        Return radial and axial functions for the cylindrical transverse kernel.
+
+        The kernel describes an on-axis z dipole in a cylindrical m = 0 cell.
+        Its sampled values come from the module-cached 3D computation, and the
+        resulting functions are cached on this wrapper.
+        """
+
+        if not hasattr(self, "_cylindrical_transverse_kernel"):
+            fft_box_scale = 15
+            (
+                radius_grid,
+                axial_grid,
+                radial_values,
+                axial_values,
+            ) = calc_transverse_components_cylindrical(
+                size=(self.size.x, self.size.x, self.size.z),
+                dx=1.0 / self.m.resolution,
+                sigma=self.sigma,
+                mu12=self.rescaling_factor,
+                local_size=self.size.x * fft_box_scale,
+            )
+            self._cylindrical_transverse_kernel = (
+                _make_cylindrical_kernel_function(
+                    radius_grid, axial_grid, radial_values
+                ),
+                _make_cylindrical_kernel_function(
+                    radius_grid, axial_grid, axial_values
+                ),
+            )
+        return self._cylindrical_transverse_kernel
+
     def _init_sources_transverse(self):
         """
         Construct Meep sources for the molecule's polarization kernel (1D/2D/3D)
@@ -718,8 +832,42 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
 
         if self.dimensions == 1 or self.dimensions == 2:
             raise ValueError(
-                "Transverse polarization_type is currently only supported in 3D simulations."
+                "Transverse polarization_type is currently only supported in "
+                "3D and cylindrical (m = 0) simulations."
             )
+
+        if self.dimensions == mp.CYLINDRICAL:
+            # m = 0: the transverse kernel of the on-axis z dipole has a
+            # radial and an axial component, sampled from the y = 0 slice of
+            # the (cached) 3D transverse computation
+            radial_kernel, axial_kernel = self._get_cylindrical_transverse_kernel()
+
+            def radial_amp_func(R):
+                return radial_kernel(R.x, R.z)
+
+            def axial_amp_func(R):
+                return axial_kernel(R.x, R.z)
+
+            for comp, field_tag, source_profile in (
+                (mp.Er, "Er", radial_amp_func),
+                (mp.Ez, "Ez", axial_amp_func),
+            ):
+                key = _transverse_source_key(
+                    self.polarization_fingerprint_hash, field_tag, "z"
+                )
+                if key not in _fingerprint_source:
+                    instantaneous_source_amplitudes[key] = 0.0
+                    _fingerprint_source[key] = mp.Source(
+                        src=_make_custom_time_src(key),
+                        component=comp,
+                        center=center,
+                        size=size,
+                        amplitude=1.0,
+                        amp_func=source_profile,
+                    )
+                srcs.append(_fingerprint_source[key])
+            self.sources = srcs
+            return
 
         if self.dimensions == 1:
             key = (self.polarization_fingerprint_hash, "Ez")
@@ -1102,6 +1250,23 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
                 * (ez),
                 vol,
             )
+        elif self.dimensions == mp.CYLINDRICAL:
+            # m = 0: only the on-axis z-component couples. The integrand is
+            # the same z^2-weighted Gaussian as in 3D (with center.x =
+            # center.y = 0 and R = (r, 0, z)); Meep's cylindrical
+            # integration supplies the 2 pi r volume element.
+            z = sim.integrate_field_function(
+                [mp.Ez],
+                lambda R, ez: self._polarization_prefactor_3d
+                * (R.z - self.center.z)
+                * (R.z - self.center.z)
+                * exp(
+                    -(R.x * R.x + (R.z - self.center.z) * (R.z - self.center.z))
+                    / (2.0 * self.sigma**2)
+                )
+                * (ez),
+                vol,
+            )
         else:  # 3D
             z = sim.integrate_field_function(
                 [mp.Ez],
@@ -1168,14 +1333,46 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
             Regularized field integrals ``[I_x, I_y, I_z]`` in Meep units.
         """
 
-        if self.dimensions != 3:
+        if self.dimensions in (1, 2):
             raise ValueError(
-                "Transverse polarization_type is currently only supported in 3D simulations."
+                "Transverse polarization_type is currently only supported in 3D and cylindrical (m = 0) simulations."
             )
 
         vol = mp.Volume(size=_to_mp_v3(self.size), center=_to_mp_v3(self.center))
         dx = 1.0 / self.m.resolution
         cutoff = 15
+
+        if self.dimensions == mp.CYLINDRICAL:
+            # The kernel is already transverse. Integrate it directly in the
+            # native (r, z) cell; Meep supplies the cylindrical 2 pi r measure.
+            radial_kernel, axial_kernel = self._get_cylindrical_transverse_kernel()
+            if not hasattr(self, "_cylindrical_transverse_normalization"):
+                axial_kernel_integral = sim.integrate_field_function(
+                    [mp.Ez],
+                    lambda R, ez: axial_kernel(R.x, R.z - self.center.z),
+                    vol,
+                )
+                self._cylindrical_transverse_normalization = (
+                    self.rescaling_factor / axial_kernel_integral
+                )
+            radial_overlap = sim.integrate_field_function(
+                [mp.Er],
+                lambda R, er: radial_kernel(R.x, R.z - self.center.z) * er,
+                vol,
+            )
+            axial_overlap = sim.integrate_field_function(
+                [mp.Ez],
+                lambda R, ez: axial_kernel(R.x, R.z - self.center.z) * ez,
+                vol,
+            )
+            return [
+                0.0,
+                0.0,
+                np.real(
+                    (radial_overlap + axial_overlap)
+                    * self._cylindrical_transverse_normalization
+                ),
+            ]
 
         ex = np.asarray(sim.get_array(mp.Ex, vol))
         ey = np.asarray(sim.get_array(mp.Ey, vol))
@@ -1906,6 +2103,10 @@ class MeepSimulation(mp.Simulation):
 
         self.socket_hub = hub
         self.molecules = molecules if molecules is not None else []
+        if self.dimensions == mp.CYLINDRICAL and self.molecules and self.m != 0:
+            raise ValueError(
+                "Cylindrical molecule coupling currently supports only m=0."
+            )
 
         if (time_units_fs is None) and (length_units_nm is None):
             raise ValueError(
