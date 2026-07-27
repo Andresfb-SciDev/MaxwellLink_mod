@@ -21,5 +21,6 @@ Example
 
 from .dummy_cavity import DummyCavity
 from .vacuum import Vacuum
+from .bragg import BraggResonator
 
-__all__ = ["DummyCavity", "Vacuum"]
+__all__ = ["DummyCavity", "Vacuum", "BraggResonator"]
