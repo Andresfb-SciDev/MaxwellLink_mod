@@ -24,6 +24,7 @@ K_TO_AU = 3.166811563e-6  # 1 K in atomic units of energy
 AU_TO_K = 1.0 / K_TO_AU
 
 # other units
+C_NM_PER_FS = 299.792458  # speed of light in nm/fs
 FS_INV_TO_EV = 4.135668
 BOHR_PER_ANG = 1.889726124565062
 # E(a.u.) = 5.142206747e11 V/m; F(eV/Angstrom) for q=1 is E(V/m) * 1e-10
@@ -50,3 +51,40 @@ def unit(from_unit, to_unit="au"):
         raise ValueError(f"Incompatible unit conversion: {from_unit} -> {to_unit}")
 
     return float(globals()[factor_name])
+
+
+def wavelength_nm_from_omega(omega, units="cm-1"):
+    """
+    Convert a photon frequency/energy (or wavelength) to a vacuum wavelength in nm.
+
+    Parameters
+    ----------
+    omega : float
+        Photon frequency/energy in ``units``, or a wavelength if ``units`` is
+        ``"nm"`` or ``"um"``.
+    units : str, default: "cm-1"
+        One of ``"cm-1"``, ``"eV"``, ``"au"`` (Hartree), ``"nm"``, ``"um"``.
+
+    Returns
+    -------
+    float
+        The vacuum wavelength in nanometers.
+    """
+
+    if float(omega) <= 0.0:
+        raise ValueError("omega must be positive.")
+    # convert the frequency/energy to cm^-1, then lambda[nm] = 1e7 / omega[cm^-1]
+    key = str(units).lower()
+    if key == "cm-1":
+        return 1.0e7 / float(omega)
+    elif key == "ev":
+        return 1.0e7 / (float(omega) * EV_TO_CM_INV)
+    elif key in ("au", "hartree"):
+        return 1.0e7 / (float(omega) * AU_TO_CM_INV)
+    elif key == "nm":
+        return float(omega)
+    elif key == "um":
+        return 1.0e3 * float(omega)
+    raise ValueError(
+        f"Unsupported units '{units}'. Choose from 'cm-1', 'eV', 'au', 'nm', 'um'."
+    )

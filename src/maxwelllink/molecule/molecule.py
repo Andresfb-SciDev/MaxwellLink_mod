@@ -49,6 +49,11 @@ class Molecule:
 
     EM-specific source creation and field-integral computation are provided by
     EM backends.
+
+    Notes
+    -----
+    ``center`` and ``size`` are in Cartesian coordinates, even for cylindrical
+    simulations. For cylindrical ``m = 0`` coupling, the molecule must be on the axis (``x = y = 0``) and its dipole should be along z (``orientation=2``).
     """
 
     def __init__(

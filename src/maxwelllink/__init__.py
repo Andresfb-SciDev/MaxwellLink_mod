@@ -43,6 +43,8 @@ __all__ = [
     "LaserDrivenSimulation",
     "MaxwellBoltzmannInitializer",
     "LangevinThermostat",
+    "cavity",
+    "measurements",
 ]
 
 
@@ -68,6 +70,12 @@ def __getattr__(name):
     """
     if name == "sockets":
         return importlib.import_module(".sockets", __name__)
+
+    if name == "cavity":
+        return importlib.import_module(".cavity", __name__)
+
+    if name == "measurements":
+        return importlib.import_module(".measurements", __name__)
 
     # Legacy code path (molecule_fast) kept for reference; prefer molecule_abstract + em_solvers/meep now.
     if name in {
