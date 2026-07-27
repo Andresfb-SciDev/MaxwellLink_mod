@@ -16,8 +16,6 @@
 
 This code supports both exploratory demonstrations and production-scale calculations. In particular, its socket-based architecture allows large-scale self-consistent light–matter simulations to run efficiently across multiple HPC nodes.
 
-The latest version of **MaxwellLink** (v0.3) ships with [**AI Agent Skills**](https://taoeli.github.io/MaxwellLink/agent_skills.html). With simple natural language inputs, users can easily create input files and run jobs on both local machines and HPC systems.
-
 ## Key Features
 
 - **Embracing state-of-the-art ecosystems** in both computational electrodynamics and quantum chemistry, extending the boundary of light-matter simulations.
@@ -33,13 +31,13 @@ The most appealing feature of **MaxwellLink** is that it enables the self-consis
 
 ![MaxwellLink workflow](media/workflow.png)
 
-The socket communication technique further allows distributed light-matter simulations on different machines and HPC nodes -- both the EM solver and molecular drivers can have their **own MPI parallel processes**.
+The socket communication technique further allows distributed light-matter simulations on different machines and HPC nodes, i.e., both the EM solver and molecular drivers can have their **own MPI parallel processes**.
 
 As of today, the following [EM solvers](https://maxwelllink.org/em_solvers/index.html) and [molecular drivers](https://maxwelllink.org/drivers/index.html) are supported.
 
 ### Supported EM solvers
 
-- Full-feature [MEEP FDTD](https://meep.readthedocs.io/en/latest/),
+- Full-feature [MEEP FDTD](https://meep.readthedocs.io/en/latest/) in 1D, 2D, 3D, and cylindrical coordinates (3D simulations at 2D cost),
 - Single-mode cavity, 
 - Multimode Fabry-Perot cavity, and
 - Arbitrary laser driven dynamics. 
@@ -97,9 +95,9 @@ mxl hpc
 
 If you find **MaxwellLink** helpful for your research, please cite the following reference:
 
-- X Ji †, AF Bocanegra Vargas †, G Meng, and TE Li. *MaxwellLink: A Unified Framework for Self-Consistent Light-Matter Simulations*. [J. Chem. Theory Comput. ASAP](https://doi.org/10.1021/acs.jctc.5c02028) (2026). [[data](https://github.com/TaoELi/maxwelllink_examples)] [[arXiv:2512.06173](https://arxiv.org/abs/2512.06173)] 
+- X Ji †, AF Bocanegra Vargas †, G Meng, and TE Li. *MaxwellLink: A Unified Framework for Self-Consistent Light-Matter Simulations*. [J. Chem. Theory Comput. 22, 2725–2738](https://doi.org/10.1021/acs.jctc.5c02028) (2026). [[data](https://github.com/TaoELi/maxwelllink_examples)] [[arXiv:2512.06173](https://arxiv.org/abs/2512.06173)] 
 
 
 ## Publications using MaxwellLink
 
-- X Ji, and TE Li. *Nonlinear Freezing of Vibrational Polariton Transport via Mesoscale Simulations*. submitted (2026). [[data](https://github.com/TaoELi/maxwelllink_examples)]
+- X Ji, and TE Li. *Nonlinear Freezing of Vibrational Polariton Transport via Mesoscale Simulations*. [arXiv:2606.27463](https://arxiv.org/abs/2606.27463) (2026). [[data](https://github.com/TaoELi/maxwelllink_examples)]
