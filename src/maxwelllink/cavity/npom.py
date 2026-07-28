@@ -21,7 +21,7 @@ from .dummy_cavity import DummyCavity
 RADIUS_NM = 20.0  # gold nanoparticle of 40 nm diameter
 GAP_NM = 0.9  # cucurbit[7]uril spacer that hosts the molecule
 SPACER_INDEX = 1.4  # refractive index of the cucurbit[7]uril monolayer
-FILM_NM = 70.0  # evaporated gold mirror (~5 skin depths at 660 nm)
+FILM_NM = 1.0  # thin numerical gold mirror backed by the bottom cell wall
 
 # gap plasmon reported for that geometry: dark-field scattering peak (nm),
 # quality factor, and effective mode volume (nm^3) of the same paper
@@ -90,8 +90,9 @@ class NPoM(DummyCavity):
         spacer_index : float, default: 1.4
             Refractive index of the spacer layer, which extends laterally
             across the whole cell as in the paper.
-        film_nm : float, default: 70.0
-            Thickness (nm) of the gold mirror.
+        film_nm : float, default: 1.0
+            Thickness (nm) of the gold mirror. The thin default is sufficient
+            because the mirror is backed by the bottom cell wall.
         omega_ref : float, default: 660.0
             Reference frequency (or wavelength) in ``units``, i.e. roughly
             where the gap plasmon is expected. It sets no length of the
