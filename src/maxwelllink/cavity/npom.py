@@ -21,7 +21,7 @@ from .dummy_cavity import DummyCavity
 RADIUS_NM = 20.0  # gold nanoparticle of 40 nm diameter
 GAP_NM = 0.9  # cucurbit[7]uril spacer that hosts the molecule
 SPACER_INDEX = 1.4  # refractive index of the cucurbit[7]uril monolayer
-FILM_NM = 1.0  # thin numerical gold mirror backed by the bottom cell wall
+FILM_NM = 70.0  # evaporated gold mirror (~5 skin depths at 660 nm)
 
 # gap plasmon reported for that geometry: dark-field scattering peak (nm),
 # quality factor, and effective mode volume (nm^3) of the same paper
@@ -61,7 +61,7 @@ class NPoM(DummyCavity):
     >>> cav = NPoM(resolution=3334.0)
     >>> spectrum = cav.linear_spectrum(500.0, 900.0, units="nm", min_time=30.0)
     >>> lam = spectrum["wavelength_nm"]
-    >>> radiated = spectrum["radiated"]
+    >>> radiated = spectrum["escaped_spectrum"]
     """
 
     def __init__(
@@ -90,9 +90,8 @@ class NPoM(DummyCavity):
         spacer_index : float, default: 1.4
             Refractive index of the spacer layer, which extends laterally
             across the whole cell as in the paper.
-        film_nm : float, default: 1.0
-            Thickness (nm) of the gold mirror. The thin default is sufficient
-            because the mirror is backed by the bottom cell wall.
+        film_nm : float, default: 70.0
+            Thickness (nm) of the gold mirror.
         omega_ref : float, default: 660.0
             Reference frequency (or wavelength) in ``units``, i.e. roughly
             where the gap plasmon is expected. It sets no length of the
@@ -356,10 +355,33 @@ class NPoM(DummyCavity):
         """
 
         surface = self.radiated_flux_regions()  # the lid first, then the walls
+        boundary = self.pml_thickness
+        distance_below_source = self.hotspot_center.z + 0.5 * self.cell_size.z
+
+        # reference boundaries are needed because the default geometry has no PML at -z.
+        reference_boundaries = [
+            mp.PML(thickness=boundary, direction=mp.Z, side=mp.High),
+            mp.PML(
+                thickness=0.5 * distance_below_source,
+                direction=mp.Z,
+                side=mp.Low,
+            ),
+        ]
+        reference_boundaries += (
+            [mp.PML(thickness=boundary, direction=mp.R, side=mp.High)]
+            if self.dimensions == mp.CYLINDRICAL
+            else [mp.PML(thickness=boundary, direction=axis) for axis in (mp.X, mp.Y)]
+        )
+
         return {
             # a point dipole at the gap center, polarized along the gap field
             "excitation": {"center": self.hotspot_center, "size": mp.Vector3()},
-            "detectors": {"radiated": surface[:1], "lateral": surface[1:]},
+            # ``escaped`` is the complete radiating surface (top lid + lateral walls)
+            "detectors": {
+                "escaped": surface,
+                "top": surface[:1],
+                "lateral": surface[1:],
+            },
             "component": mp.Ez,
             "reference_geometry": [
                 mp.Block(
@@ -367,6 +389,7 @@ class NPoM(DummyCavity):
                     material=mp.Medium(index=self.spacer_index),
                 )
             ],
+            "reference_boundary_layers": reference_boundaries,
             # watch the ringdown a mode radius off the axis: on the dipole
             # itself the singular self-field collapses with the pulse and
             # would stop the run before the plasmon has rung down

@@ -8,11 +8,8 @@
 """
 Linear spectroscopy of an FDTD cavity:
 
-- ``MeepTransmissionSpectroscopy``: a plane wave crosses the structure. The natural probe of a mirror cavity.
-- ``MeepEmissionSpectroscopy``: a local source inside the cavity drives it and closed surfaces
-   record what escapes. The natural probe for a plasmonic nanocavity.
-
-Both are reached through ``cavity.linear_spectrum(...)``, which picks one from the optical setup.
+- ``MeepTransmissionSpectroscopy``: a plane wave crosses the structure for probing a mirror cavity.
+- ``MeepEmissionSpectroscopy``: a local source inside the cavity for probing a plasmonic nanocavity.
 """
 
 import warnings
@@ -36,22 +33,6 @@ DECAY_CHECK_DT = 50
 class MeepTransmissionSpectroscopy(DummyMeasurement):
     """
     Transmission/reflection spectroscopy of an FDTD cavity (two Meep runs).
-
-    1. ``reference`` excites the reference structure of ``cavity.optical_setup()``
-    on the cavity grid and records the incident spectrum (plus the incident
-    fields at the reflection detector);
-    2. ``signal_run`` then excites the full cavity (plus molecules and ``extra_geometry``),
-    with the reflected wave isolated by subtracting the recorded incident fields;
-    3. ``postprocess`` divides the fluxes into the transmission, reflection, and absorption
-    (= 1 - T - R) spectra.
-
-    Notes
-    -----
-    - The usual entry point is ``cavity.linear_spectrum(...)``, which builds
-      this measurement and calls ``run()``.
-    - Runtime scales with the cavity quality factor: by default each run
-      stops only when the detector fields have rung down (pass ``steps`` for
-      a fixed-length run instead).
 
     Examples
     --------
@@ -164,9 +145,12 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
         return self.setup["detectors"]["transmission"]["center"]
 
     def _reference_simulation(self):
-        """The reference structure of ``optical_setup()``, on the same grid."""
+        """Build the reference structure"""
+
         kwargs = self.cavity.sim_kwargs()
         kwargs["geometry"] = list(self.setup["reference_geometry"])
+        if "reference_boundary_layers" in self.setup:
+            kwargs["boundary_layers"] = list(self.setup["reference_boundary_layers"])
         kwargs["sources"] = self._sources()
         kwargs.update(self.meep_kwargs)
         return mp.Simulation(**kwargs)
@@ -299,7 +283,7 @@ class MeepEmissionSpectroscopy(MeepTransmissionSpectroscopy):
     --------
     >>> from maxwelllink.cavity import NPoM
     >>> spectrum = NPoM().linear_spectrum(500.0, 900.0, units="nm")
-    >>> spectrum["wavelength_nm"], spectrum["radiated"]
+    >>> spectrum["wavelength_nm"], spectrum["escaped_spectrum"]
     """
 
     # a plasmonic gap mode rings down in a few Meep time units, far faster
@@ -354,17 +338,25 @@ class MeepEmissionSpectroscopy(MeepTransmissionSpectroscopy):
         return self._record(self._signal_simulation())
 
     def postprocess(self, reference, signals):
-        """Turn the raw power spectra into enhancements over the reference."""
+        """
+        Normalize cavity-defined detectors independently.
+        """
 
         freqs = signals["frequency_meep"]
+        source = self._sources()[0].src
+        source_raw_power = (
+            np.abs(np.array([source.fourier_transform(freq) for freq in freqs])) ** 2
+        )
         observables = {
             "frequency_meep": freqs,
+            "source_raw_power": source_raw_power,
             # total decay-rate enhancement of the emitter: the Purcell factor
             "purcell": signals["emitted"] / reference["emitted"],
         }
         for name, flux in signals["radiated"].items():
-            observables[name] = flux / reference["radiated"][name]
-            observables[f"{name}_power"] = flux
+            observables[f"{name}_raw_power"] = flux
+            observables[f"{name}_enhancement"] = flux / reference["radiated"][name]
+            observables[f"{name}_spectrum"] = flux / source_raw_power
         return self._assemble_result(
             1.0e7 * freqs / self.cavity.length_units_nm, **observables
         )
