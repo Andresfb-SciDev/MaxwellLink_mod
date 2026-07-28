@@ -19,6 +19,24 @@ from ..molecule import Molecule
 from ..units import C_NM_PER_FS, wavelength_nm_from_omega
 
 
+def is_emission_setup(setup):
+    """
+    Whether an ``optical_setup()`` describes a local-source measurement
+    rather than the plane-wave one.
+
+    Parameters
+    ----------
+    setup : dict
+        The return value of ``DummyCavity.optical_setup``.
+
+    Returns
+    -------
+    bool
+    """
+
+    return "transmission" not in setup["detectors"]
+
+
 class DummyCavity:
     """
     A dummy FDTD cavity for demonstration purposes.
@@ -43,8 +61,8 @@ class DummyCavity:
     (``dimensions = mp.CYLINDRICAL``). In cylindrical coordinates the active
     axes are (r, z), with the ``mp.Vector3`` x component playing the role of
     the radial coordinate r; the cell spans r in [0, R] with the axis at
-    r = 0, and the azimuthal dependence exp(i m phi) is chosen by passing
-    ``m=...`` to ``make_simulation``.
+    r = 0, and the azimuthal dependence exp(i m phi) comes from the ``m``
+    attribute (or from an explicit ``m=...`` at simulation time).
     """
 
     def __init__(self, omega=3000.0, units="cm-1", dimensions=1):
@@ -105,6 +123,8 @@ class DummyCavity:
         self.geometry = []
         self.boundary_layers = []  # empty: perfect metallic walls
         self.k_point = None
+        # azimuthal number exp(i m phi) of a cylindrical cell
+        self.m = None
 
         # molecule placement: the hotspot sits at the origin and molecules
         # may be placed anywhere in the vacuum interior
@@ -273,7 +293,7 @@ class DummyCavity:
                     "cavity. Use offset_nm / size_nm / sigma_nm instead, or "
                     "construct mxl.Molecule directly for full manual control."
                 )
-            
+
         if hotspot is None:
             base_point = self.hotspot_center
         elif hotspot in self.hotspots:
@@ -308,7 +328,7 @@ class DummyCavity:
             resolution=self.resolution,
             **molecule_kwargs,
         )
-        # record the footprint so that plot() can draw it
+        # record it so that plot() can draw the molecules
         self.placed_molecules.append({"center": center, "size": size})
         return molecule
 
@@ -451,17 +471,23 @@ class DummyCavity:
         """
         Return the optical setup of this cavity as a plain dict:
         - ``"excitation"`` : dict with the ``"center"`` and ``"size"``
-          (``mp.Vector3``, Meep units) of the plane where source pulses are injected;
-        - ``"detectors"`` : dict of named detector planes (each a dict with
-          ``"center"`` and ``"size"``), e.g. ``"reflection"`` and
-          ``"transmission"`` for the mirror cavities;
+          (``mp.Vector3``, Meep units) of the region where source pulses are
+          injected; a zero ``"size"`` makes it a point source;
+        - ``"detectors"`` : dict of named detectors, whose names also say how
+          the cavity is probed: a ``"transmission"`` and a ``"reflection"`` plane (each a dict with
+          ``"center"`` and ``"size"``) for the plane-wave measurement, or any
+          other names for the local-source one;
         - ``"component"`` : the field component injected and detected;
         - ``"reference_geometry"`` : the structure of the reference
-          (normalization) run, such as vacuum.
+          (normalization) run, such as vacuum;
+        - ``"decay_monitor"`` : optional ``mp.Vector3`` where the stopping
+          criterion watches the fields ring down. Local-source setups should
+          keep it away from the source, whose singular self-field collapses
+          as soon as the pulse ends.
 
         Notes
         -----
-        This method *may be* overridden by subclasses. 
+        This method *may be* overridden by subclasses.
         """
 
         pml = self.pml_thickness if self.pml_thickness is not None else 0.0
@@ -513,12 +539,7 @@ class DummyCavity:
 
     def linear_spectrum(self, omega_min, omega_max, units="cm-1", **kwargs):
         """
-        Compute the linear transmission/reflection/absorption spectrum.
-
-        Two FDTD runs on the same grid: a normalization run through the
-        reference structure of ``optical_setup()`` records the incident
-        spectrum, then a scattering run through the full cavity (plus
-        molecules, if any) records what is transmitted and reflected.
+        Compute the linear spectrum of the cavity.
 
         Parameters
         ----------
@@ -527,24 +548,27 @@ class DummyCavity:
         units : str, default: "cm-1"
             Units of the window: "cm-1", "eV", "au", "nm", or "um".
         **kwargs
-            Forwarded to
-            ``maxwelllink.measurements.MeepLinearSpectroscopy``: ``nfreq``,
-            ``molecules``, ``hub``, ``extra_geometry``, ``decay_by``,
-            ``steps``, and extra Meep keyword arguments.
+            Forwarded to the measurement class: ``nfreq``, ``molecules``,
+            ``hub``, ``extra_geometry``, ``decay_by``, ``steps``,
+            ``min_time``, and extra Meep keyword arguments.
 
         Returns
         -------
         dict
-            Dictionary with arrays ``omega_cminv``, ``wavelength_nm``, ``frequency_meep``,
-            ``transmission``, ``reflection``, ``absorption``.
+            Dictionary with arrays ``omega_cminv``, ``wavelength_nm``,
+            ``frequency_meep``, and the observables of the chosen probe.
         """
 
-        from ..measurements import MeepLinearSpectroscopy
-
-        measurement = MeepLinearSpectroscopy(
-            self, omega_min, omega_max, units=units, **kwargs
+        from ..measurements import (
+            MeepEmissionSpectroscopy,
+            MeepTransmissionSpectroscopy,
         )
-        return measurement.run()
+
+        if is_emission_setup(self.optical_setup()):
+            measurement = MeepEmissionSpectroscopy
+        else:
+            measurement = MeepTransmissionSpectroscopy
+        return measurement(self, omega_min, omega_max, units=units, **kwargs).run()
 
     # -------------- simulation assembly (no need to override) --------------
 
@@ -577,6 +601,8 @@ class DummyCavity:
         # cylindrical coordinates cannot be inferred from the cell by Meep
         if self.dimensions == mp.CYLINDRICAL:
             kwargs["dimensions"] = mp.CYLINDRICAL
+            if self.m is not None:
+                kwargs["m"] = self.m
         return kwargs
 
     def make_simulation(
@@ -675,10 +701,10 @@ class DummyCavity:
 
         lines = [
             f"{type(self).__name__} ({self._dimensions_label()})",
-            f"  design wavelength : {self.wavelength_nm:.2f} nm "
+            f"  cavity wavelength : {self.wavelength_nm:.2f} nm "
             f"({1.0e7 / self.wavelength_nm:.2f} cm^-1)",
             f"  Meep units        : a = 1 um "
-            f"(design frequency = {self.frequency_meep:.6g}, "
+            f"(cavity frequency = {self.frequency_meep:.6g}, "
             f"1 time unit = {self.time_units_fs:.4f} fs)",
             f"  resolution        : {self.resolution:g} px per um "
             f"(~{grid_points:,} grid points)",
@@ -697,7 +723,7 @@ class DummyCavity:
         for axis, (lo_nm, hi_nm) in self.allowed_bounds_nm.items():
             lines.append(f"  allowed region {axis}  : [{lo_nm:.1f}, {hi_nm:.1f}] nm")
         lines.append(
-            f"  molecule defaults : sigma = {sigma_nm:.2f} nm (1 px), "
+            f"  molecule defaults : sigma = {sigma_nm:.2f} nm (2 px), "
             f"size = {10.0 * sigma_nm:.2f} nm (10 sigma)"
         )
         try:
@@ -705,15 +731,26 @@ class DummyCavity:
             # planes vary along x in Cartesian cells and along z in
             # cylindrical ones
             axis = "z" if self.dimensions == mp.CYLINDRICAL else "x"
-            detectors = ", ".join(
-                f"{name} @ {self.meep_to_nm(getattr(plane['center'], axis)):.1f} nm"
-                for name, plane in setup["detectors"].items()
-            )
-            lines.append(
-                f"  optical setup ({axis}) : excitation @ "
-                f"{self.meep_to_nm(getattr(setup['excitation']['center'], axis)):.1f}"
-                f" nm; {detectors}"
-            )
+            source = self.meep_to_nm(getattr(setup["excitation"]["center"], axis))
+            if is_emission_setup(setup):
+                # a local source and closed detector surfaces, not planes
+                detectors = ", ".join(
+                    f"{name} ({len(regions)} faces)"
+                    for name, regions in setup["detectors"].items()
+                )
+                lines.append(
+                    f"  optical setup     : emission; source @ {source:.1f} nm "
+                    f"({axis}); {detectors}"
+                )
+            else:
+                detectors = ", ".join(
+                    f"{name} @ {self.meep_to_nm(getattr(plane['center'], axis)):.1f} nm"
+                    for name, plane in setup["detectors"].items()
+                )
+                lines.append(
+                    f"  optical setup ({axis}) : excitation @ {source:.1f}"
+                    f" nm; {detectors}"
+                )
         except NotImplementedError:
             pass  # no optical access
         if self.k_point is not None:

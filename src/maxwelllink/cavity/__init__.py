@@ -22,5 +22,6 @@ Example
 from .dummy_cavity import DummyCavity
 from .vacuum import Vacuum
 from .bragg import BraggResonator
+from .npom import NPoM
 
-__all__ = ["DummyCavity", "Vacuum", "BraggResonator"]
+__all__ = ["DummyCavity", "Vacuum", "BraggResonator", "NPoM"]

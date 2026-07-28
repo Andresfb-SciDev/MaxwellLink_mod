@@ -26,11 +26,11 @@ class Vacuum(DummyCavity):
     -----
     With ``dimensions=mp.CYLINDRICAL`` the cell is an (r, z) half-plane: the
     axis sits at r = 0, the allowed region spans r in [0, size_r] and
-    z in [-size_z/2, +size_z/2]. 
-    
-    Since the field of a z-polarized dipole on the axis has full rotational symmetry, 
+    z in [-size_z/2, +size_z/2].
+
+    Since the field of a z-polarized dipole on the axis has full rotational symmetry,
     an m = 0 cylindrical run (``make_simulation(m=0)``) can reproduce 3D free-space physics
-    at 2D cost. 
+    at 2D cost.
 
     Examples
     --------

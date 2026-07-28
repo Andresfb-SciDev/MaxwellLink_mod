@@ -16,8 +16,8 @@ class DummyMeasurement:
 
     This class serves as a template for implementing light-induced measurements,
     which excite an EM solver (plus its molecules) with light pulses and turn
-    the recorded response into user-facing observables. 
-    
+    the recorded response into user-facing observables.
+
     Every measurement splits into three steps:
     1. ``reference()`` -- the excitation baseline, computed analytically
        (e.g. the spectrum of a known laser pulse) or by a molecule-free
@@ -27,7 +27,7 @@ class DummyMeasurement:
     3. ``postprocess(reference, signals)`` -- combine both into the
        observable arrays.
 
-    ``run()`` chains the three steps and is the single user-facing entry point. 
+    ``run()`` chains the three steps and is the single user-facing entry point.
     """
 
     def __init__(self, omega_min, omega_max, units="cm-1", nfreq=200, molecules=None):

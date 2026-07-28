@@ -40,10 +40,11 @@ PLOT_STYLE = {
 # colors cycled over the named detector planes of an optical setup
 _DETECTOR_COLORS = ("cyan", "dark_green", "magenta", "brown")
 
-# footprint shading: (cavity attribute, color, alpha, legend label)
-_FOOTPRINTS = (
-    ("placed_molecules", "magenta", 0.45, "molecule"),
-    ("placed_regions", "brown", 0.30, "region"),
+# the two ways MaxwellLink molecules enter a cavity, as drawn:
+# (cavity attribute, color, alpha, legend label)
+_MOLECULES = (
+    ("placed_molecules", "magenta", 0.45, "molecule"),  # molecule-level route
+    ("placed_regions", "brown", 0.30, "region"),  # grid-level route
 )
 
 # -------------- style primitives (for any MaxwellLink figure) --------------
@@ -121,6 +122,8 @@ def draw_optical_planes(cavity, ax, in_nm=True):
 
     import meep as mp
 
+    from ..cavity.dummy_cavity import is_emission_setup
+
     try:
         setup = cavity.optical_setup()
     except NotImplementedError:
@@ -131,8 +134,27 @@ def draw_optical_planes(cavity, ax, in_nm=True):
     axis = "z" if cylindrical else "x"
     draw_line = ax.axhline if cylindrical else ax.axvline
     scale = cavity.length_units_nm if in_nm else 1.0
+    source = setup["excitation"]
+    if is_emission_setup(setup):
+        # a local source read out through closed surfaces, not two planes:
+        # mark the source point and outline every detector face
+        ax.plot(
+            scale * source["center"].x,
+            scale * getattr(source["center"], axis),
+            marker="*",
+            color=PLOT_COLORS["sky_blue" if in_nm else "yellow"],
+            markersize=10,
+            linestyle="none",
+            label="source",
+        )
+        for (name, regions), color in zip(setup["detectors"].items(), _DETECTOR_COLORS):
+            for i, region in enumerate(regions):
+                _draw_flux_region(
+                    ax, cavity, region, PLOT_COLORS[color], name if i == 0 else None
+                )
+        return
     draw_line(
-        scale * getattr(setup["excitation"]["center"], axis),
+        scale * getattr(source["center"], axis),
         color=PLOT_COLORS["sky_blue" if in_nm else "yellow"],
         linestyle="--" if not in_nm else "-.",
         linewidth=1.5,
@@ -148,9 +170,22 @@ def draw_optical_planes(cavity, ax, in_nm=True):
         )
 
 
-def draw_footprints(cavity, ax, vertical=None):
+def _draw_flux_region(ax, cavity, region, color, label):
+    """Draw one face of a detector surface in the r-z (or x-z) plan view."""
+
+    x0 = region.center.x - 0.5 * region.size.x
+    x1 = region.center.x + 0.5 * region.size.x
+    z0 = region.center.z - 0.5 * region.size.z
+    z1 = region.center.z + 0.5 * region.size.z
+    ax.plot([x0, x1], [z0, z1], color=color, linestyle=":", linewidth=1.5, label=label)
+
+
+def draw_molecules(cavity, ax, vertical=None):
     """
-    Shade the footprints of placed molecules and molecular regions.
+    Shade the MaxwellLink molecules placed in the cavity: those of the
+    molecule-level route (``placed_molecules``, from ``place_molecule``) and
+    the molecular media of the grid-level route (``placed_regions``, from
+    ``place_region``).
 
     Parameters
     ----------
@@ -166,15 +201,15 @@ def draw_footprints(cavity, ax, vertical=None):
     from matplotlib.patches import Rectangle
 
     def _clipped(cavity, size, axis):
-        """Extent of a footprint along an axis, clipped to the cell."""
+        """Extent of a molecule along an axis, clipped to the cell."""
         return min(getattr(size, axis), getattr(cavity.cell_size, axis))
 
-    for attr, color, alpha, label in _FOOTPRINTS:
-        for i, item in enumerate(getattr(cavity, attr)):
-            sx = _clipped(cavity, item["size"], "x")
+    for attr, color, alpha, label in _MOLECULES:
+        for i, molecule in enumerate(getattr(cavity, attr)):
+            sx = _clipped(cavity, molecule["size"], "x")
             if vertical is None:
-                x0 = cavity.meep_to_nm(item["center"].x - 0.5 * sx)
-                x1 = cavity.meep_to_nm(item["center"].x + 0.5 * sx)
+                x0 = cavity.meep_to_nm(molecule["center"].x - 0.5 * sx)
+                x1 = cavity.meep_to_nm(molecule["center"].x + 0.5 * sx)
                 ax.axvspan(
                     x0,
                     x1,
@@ -183,12 +218,12 @@ def draw_footprints(cavity, ax, vertical=None):
                     label=label if i == 0 else None,
                 )
             else:
-                sv = _clipped(cavity, item["size"], vertical)
+                sv = _clipped(cavity, molecule["size"], vertical)
                 ax.add_patch(
                     Rectangle(
                         (
-                            item["center"].x - 0.5 * sx,
-                            getattr(item["center"], vertical) - 0.5 * sv,
+                            molecule["center"].x - 0.5 * sx,
+                            getattr(molecule["center"], vertical) - 0.5 * sv,
                         ),
                         sx,
                         sv,
@@ -262,7 +297,7 @@ def plot_cavity_1d(cavity, ax=None):
             label="allowed region",
             zorder=0,
         )
-        draw_footprints(cavity, ax)
+        draw_molecules(cavity, ax)
         ax.axvline(
             cavity.meep_to_nm(cavity.hotspot_center.x),
             color=PLOT_COLORS["red"],
@@ -308,7 +343,7 @@ def plot_cavity_2d(cavity, ax=None, **kwargs):
         draw_optical_planes(cavity, ax, in_nm=False)
         # vertical axis of the plotted plane: y in 2D, z in the 3D default
         # view and in the cylindrical r-z plane
-        draw_footprints(cavity, ax, vertical="y" if cavity.dimensions == 2 else "z")
+        draw_molecules(cavity, ax, vertical="y" if cavity.dimensions == 2 else "z")
         polish_axes(ax, despine=False)
     return ax
 

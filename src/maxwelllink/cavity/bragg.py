@@ -20,14 +20,14 @@ class BraggResonator(DummyCavity):
     A ``BraggResonator`` is a planar cavity whose two mirrors are quarter-wave
     dielectric stacks: alternating layers of high (``n_hi``) and low (``n_lo``)
     refractive index, each one quarter of the design wavelength thick inside
-    its medium. 
-    
-    Increasing ``n_pairs`` increases the mirror reflectivity and the quality factor. 
+    its medium.
+
+    Increasing ``n_pairs`` increases the mirror reflectivity and the quality factor.
 
     Notes
     -----
     - With ``transverse_boundary="periodic"`` the cell is Bloch-periodic
-      (``k_point = (0, 0, 0)``), and Meep may then use complex fields. 
+      (``k_point = (0, 0, 0)``), and Meep may then use complex fields.
 
     Examples
     --------
@@ -100,9 +100,7 @@ class BraggResonator(DummyCavity):
         if int(dimensions) == 1 and transverse_size_nm is not None:
             warnings.warn("transverse_size_nm has no meaning in a 1D cavity.")
         if int(dimensions) == mp.CYLINDRICAL:
-            raise ValueError(
-                "BraggResonator supports only dimensions 1, 2, or 3."
-            )
+            raise ValueError("BraggResonator supports only dimensions 1, 2, or 3.")
 
         # default attributes (units, grid, hotspot, ...), overridden below
         super().__init__(omega=omega, units=units, dimensions=dimensions)
