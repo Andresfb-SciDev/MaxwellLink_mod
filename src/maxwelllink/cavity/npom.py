@@ -15,7 +15,7 @@ import warnings
 import numpy as np
 import meep as mp
 
-from .dummy_cavity import DummyCavity
+from .dummy_cavity import DummyCavity, CYLINDRICAL
 
 # the geometry of Chikkaraddy et al., Nature 535, 127 (2016)
 RADIUS_NM = 20.0  # gold nanoparticle of 40 nm diameter
@@ -31,9 +31,8 @@ REPORTED = {
     "mode_volume_nm3": 35.9,
 }
 
-# default grid: pixels across the spacer. Six pixels put the grid at 0.15 nm
-# for the 0.9 nm gap, finer than the 0.3 nm mesh at which the FDTD runs of the
-# paper converged.
+# default grid: pixels across the spacer (0.15 nm for the 0.9 nm gap, finer
+# than the 0.3 nm mesh at which the FDTD runs of the paper converged)
 GAP_PIXELS = 6.0
 
 # default free space around the particle and default boundary thickness, in
@@ -46,22 +45,26 @@ class NPoM(DummyCavity):
     """
     A gold nanosphere above a gold mirror, separated by a molecular spacer.
 
-    The geometry convention follows Chikkaraddy et al., Nature 535, 127 (2016),
-    doi:10.1038/nature17974.
+    The geometry convention follows Chikkaraddy et al., Nature 535, 127
+    (2016), doi:10.1038/nature17974.
 
-    The gap center on the symmetry axis is the hotspot (the field maximum and
-    the default molecule location), and the allowed region is the spacer disk
-    underneath the particle. The gap plasmon is a rotationally symmetric mode
-    polarized along z, so a cylindrical ``m = 0`` run reproduces the full 3D
-    physics at 2D cost.
+    The gap center on the symmetry axis is the hotspot, and the allowed
+    region is the spacer disk underneath the particle.
+
+    The gap plasmon is a rotationally symmetric mode polarized along z, so a
+    cylindrical ``m = 0`` run reproduces the full 3D physics at 2D cost.
+
+    The paper's dark-field scattering spectrum comes from ``linear_spectrum``
+    and its classical-emitter Purcell spectrum from ``purcell``.
 
     Examples
     --------
     >>> from maxwelllink.cavity import NPoM
-    >>> cav = NPoM(resolution=3334.0)
+    >>> cav = NPoM(resolution=3334.0)  # the paper's converged 0.3 nm mesh
     >>> spectrum = cav.linear_spectrum(500.0, 900.0, units="nm", min_time=30.0)
-    >>> lam = spectrum["wavelength_nm"]
-    >>> radiated = spectrum["escaped_spectrum"]
+    >>> lam, scattering = spectrum["wavelength_nm"], spectrum["scattering"]
+    >>> enhancement = cav.purcell(500.0, 900.0, units="nm", min_time=30.0)
+    >>> purcell_factor = enhancement["purcell"]
     """
 
     def __init__(
@@ -73,7 +76,7 @@ class NPoM(DummyCavity):
         omega_ref: float = REPORTED["gap_mode_nm"],
         units: str = "nm",
         material=None,
-        dimensions: int = mp.CYLINDRICAL,
+        dimensions: int = CYLINDRICAL,
         resolution: float = None,
         pml_nm: float = None,
         padding_nm: float = None,
@@ -95,18 +98,14 @@ class NPoM(DummyCavity):
         omega_ref : float, default: 660.0
             Reference frequency (or wavelength) in ``units``, i.e. roughly
             where the gap plasmon is expected. It sets no length of the
-            structure, only the default grid, padding, and boundary
-            thickness. The default is the measured gap mode of the default
-            geometry.
+            structure, only the default grid, padding, and boundary thickness.
         units : str, default: "nm"
             Units of ``omega_ref``: "cm-1", "eV", "au", "nm", or "um".
         material : mp.Medium or None, optional
             Material of the particle and the mirror. Default: gold
-            (``meep.materials.Au``), whose real permittivity tracks the
-            Johnson-Christy data behind the paper's model to within ~5%
-            between 580 and 830 nm.
-        dimensions : int, default: mp.CYLINDRICAL
-            ``mp.CYLINDRICAL`` for the (r, z) half plane, where the cavity
+            (``meep.materials.Au``).
+        dimensions : int, default: mxl.CYLINDRICAL
+            ``mxl.CYLINDRICAL`` for the (r, z) half plane, where the cavity
             sets ``m = 0`` (the sector holding the gap mode), or 3 for full
             3D.
         resolution : float or None, optional
@@ -122,8 +121,8 @@ class NPoM(DummyCavity):
 
         # a dispersive metal and a rotationally symmetric mode: 1D/2D cells
         # cannot represent either the geometry or the vertical gap field
-        if dimensions not in (mp.CYLINDRICAL, 3):
-            raise ValueError("dimensions must be 3 or mp.CYLINDRICAL.")
+        if dimensions not in (CYLINDRICAL, 3):
+            raise ValueError("dimensions must be 3 or CYLINDRICAL.")
         if min(float(radius_nm), float(gap_nm), float(film_nm)) <= 0.0:
             raise ValueError("radius_nm, gap_nm, and film_nm must be positive.")
         if float(spacer_index) < 1.0:
@@ -187,9 +186,8 @@ class NPoM(DummyCavity):
         ]
 
         # -------------- cell size and boundaries --------------
-
         span_r = radius + pad + boundary
-        if self.dimensions == mp.CYLINDRICAL:
+        if self.dimensions == CYLINDRICAL:
             self.cell_size = mp.Vector3(span_r, 0.0, span_z)
             sides = [mp.Absorber(thickness=boundary, direction=mp.R, side=mp.High)]
         else:
@@ -206,10 +204,10 @@ class NPoM(DummyCavity):
         self.hotspot_center = mp.Vector3(0.0, 0.0, z_hot)
         # the gap plasmon is the rotationally symmetric mode, so cylindrical
         # runs default to that sector (override with m= at simulation time)
-        if self.dimensions == mp.CYLINDRICAL:
+        if self.dimensions == CYLINDRICAL:
             self.m = 0
         self.allowed_bounds = {"z": (z_hot - 0.5 * gap, z_hot + 0.5 * gap)}
-        if self.dimensions == mp.CYLINDRICAL:
+        if self.dimensions == CYLINDRICAL:
             self.allowed_bounds["x"] = (0.0, radius)  # x plays the role of r
         else:
             self.allowed_bounds["x"] = (-radius, radius)
@@ -234,8 +232,15 @@ class NPoM(DummyCavity):
             "mode_radius_nm": float(np.sqrt(self.radius_nm * self.gap_nm)),
             "mode_volume_nm3": float(self.gap_nm**2 * self.radius_nm),
         }
-        if is_default_gold and self._is_reference_geometry():
-            # the measured/simulated gap mode of exactly this structure
+        # the measured/simulated gap mode, when the structure is exactly the
+        # one of the paper
+        is_reported_geometry = (
+            abs(self.radius_nm - RADIUS_NM) < 1.0e-9
+            and abs(self.gap_nm - GAP_NM) < 1.0e-9
+            and abs(self.spacer_index - SPACER_INDEX) < 1.0e-9
+            and abs(self.film_nm - FILM_NM) < 1.0e-9
+        )
+        if is_default_gold and is_reported_geometry:
             self.predicted["gap_mode_nm_reported"] = REPORTED["gap_mode_nm"]
             self.predicted["quality_factor_reported"] = REPORTED["quality_factor"]
             self.predicted["mode_volume_nm3_reported"] = REPORTED["mode_volume_nm3"]
@@ -250,31 +255,24 @@ class NPoM(DummyCavity):
 
         self._warn_if_coarse(n_max=self.spacer_index, t_min=gap)
 
-    def _is_reference_geometry(self):
-        """Whether the structure is the one measured by Chikkaraddy et al."""
-        return (
-            abs(self.radius_nm - RADIUS_NM) < 1.0e-9
-            and abs(self.gap_nm - GAP_NM) < 1.0e-9
-            and abs(self.spacer_index - SPACER_INDEX) < 1.0e-9
-            and abs(self.film_nm - FILM_NM) < 1.0e-9
-        )
-
     # -------------- light-induced measurements --------------
 
-    def radiated_flux_regions(self, clearance_nm=None):
+    def _radiated_flux_regions(self, clearance_nm=None):
         """
-        The surface through which the nanocavity radiates, used for flux monitors.
+        The surface through which the nanocavity radiates: a lid above the
+        particle plus walls down to the mirror surface (which closes the box
+        from below).
 
         Parameters
         ----------
         clearance_nm : float or None, optional
             Distance (nm) between the particle and the surface. Default: 60%
-            of the way from the nanoparticle to the boundary layers, which for
-            the default cell is ~59 nm, about 1.5 particle diameters.
+            of the way from the nanoparticle to the boundary layers.
 
         Returns
         -------
         list of mp.FluxRegion
+            The lid first, then the walls.
         """
 
         # the particle occupies r <= radius and z <= top
@@ -304,7 +302,7 @@ class NPoM(DummyCavity):
         height = z_top - z_bottom
         z_center = 0.5 * (z_bottom + z_top)
 
-        if self.dimensions == mp.CYLINDRICAL:
+        if self.dimensions == CYLINDRICAL:
             wall_r = radius + clearance
             return [
                 mp.FluxRegion(  # the lid above the particle
@@ -321,44 +319,130 @@ class NPoM(DummyCavity):
 
         half = radius + clearance
         regions = [
-            mp.FluxRegion(
+            mp.FluxRegion(  # the lid above the particle
                 center=mp.Vector3(0.0, 0.0, z_top),
                 size=mp.Vector3(2.0 * half, 2.0 * half, 0.0),
                 direction=mp.Z,
             )
         ]
         for axis, direction in (("x", mp.X), ("y", mp.Y)):
+            # each wall spans the other transverse axis and the box height
+            other = "y" if axis == "x" else "x"
+            size = [0.0, 0.0, height]
+            size["xyz".index(other)] = 2.0 * half
             for sign in (+1.0, -1.0):
-                offset = {axis: sign * half}
-                size = {"x": 0.0, "y": 2.0 * half, "z": height}
-                if axis == "y":
-                    size = {"x": 2.0 * half, "y": 0.0, "z": height}
+                center = [0.0, 0.0, z_center]
+                center["xyz".index(axis)] = sign * half
                 regions.append(
-                    mp.FluxRegion(  # outward normal: the low faces count down
-                        center=mp.Vector3(
-                            offset.get("x", 0.0), offset.get("y", 0.0), z_center
-                        ),
-                        size=mp.Vector3(size["x"], size["y"], size["z"]),
+                    mp.FluxRegion(  # outward normals: the low faces count down
+                        center=mp.Vector3(*center),
+                        size=mp.Vector3(*size),
                         direction=direction,
                         weight=sign,
                     )
                 )
         return regions
 
+    def _box_bottom(self, lid, z_bottom):
+        """
+        The bottom face closing a collection box: the footprint of the given
+        lid moved to ``z_bottom``, counting downward flux.
+        """
+        return mp.FluxRegion(
+            center=mp.Vector3(lid.center.x, lid.center.y, z_bottom),
+            size=lid.size,
+            direction=mp.Z,
+            weight=-1.0,
+        )
+
     def optical_setup(self):
         """
-        Optical setup of the NPoM: a local source inside the cavity, read out
-        through closed surfaces.
+        Far-field probe of the NPoM: the dark-field-type scattering
+        measurement of Chikkaraddy et al., Nature 535, 127 (2016).
 
-        We follow the classical-emitter method of Chikkaraddy et al.: a z-polarized dipole
-        at the hotspot driving the mode.
+        A grazing sheet of vertical current drives the gap mode. The
+        reference run (the film and spacer, without the particle) records the
+        incident fields subtracted at the collection surface.
+
+        All observables are normalized by the incident intensity at the
+        hotspot. Same keys as ``DummyCavity.optical_setup``.
         """
 
-        surface = self.radiated_flux_regions()  # the lid first, then the walls
+        surface = self._radiated_flux_regions()  # the lid first, then the walls
+        lid = surface[0]
+        boundary = self.pml_thickness
+        z_top = 0.5 * self.cell_size.z - boundary  # inner edge of the top PML
+        z_mid = 0.5 * (self.mirror_surface_z + z_top)
+        height = z_top - self.mirror_surface_z
+        if self.dimensions == CYLINDRICAL:
+            # the ring source sits between the collection wall (at
+            # radius + clearance) and the absorber (at radius + padding)
+            r_source = self.nm_to_meep(self.radius_nm) + 0.85 * self.padding
+            excitation = {
+                "center": mp.Vector3(r_source, 0.0, z_mid),
+                "size": mp.Vector3(0.0, 0.0, height),
+            }
+        else:
+            # 3D: a grazing sheet just inside the -x absorber. Declared for
+            # completeness; resolving the gap in 3D is impractical.
+            x_source = -0.5 * self.cell_size.x + boundary + 2.0 / self.resolution
+            excitation = {
+                "center": mp.Vector3(x_source, 0.0, z_mid),
+                "size": mp.Vector3(0.0, self.cell_size.y - 2.0 * boundary, height),
+            }
+
+        return {
+            "probe": "scattering",
+            "excitation": excitation,
+            "component": mp.Ez,
+            "detectors": {
+                # the closed box adds the mirror-surface floor to the
+                # collection surface; net total-field flux through it gives
+                # the power the particle absorbs
+                "scattered": surface,
+                "absorption_box": surface
+                + [self._box_bottom(lid, self.mirror_surface_z)],
+            },
+            # |E_inc|^2 is recorded over a short r-line at the hotspot
+            # (zero-size DFT monitors are unreliable in cylindrical cells)
+            "normalization": {
+                "center": self.hotspot_center,
+                "size": mp.Vector3(2.0 / self.resolution, 0.0, 0.0),
+            },
+            # the film and the spacer, without the particle
+            "reference_geometry": list(self.geometry[:2]),
+            # watch the ringdown a mode radius off the axis, where the
+            # stopping criterion is more robust than on the singular axis
+            "decay_monitor": self.hotspot_center
+            + mp.Vector3(self.nm_to_meep(self.predicted["mode_radius_nm"]), 0.0),
+        }
+
+    def emission_setup(self, offset_nm=(0.0, 0.0, 0.0), component=None):
+        """
+        Local-dipole (Purcell) probe of the NPoM: a z-polarized dipole at the
+        gap hotspot (the classical-emitter method of Chikkaraddy et al.).
+
+        The reference is the homogeneous spacer medium with its own closed
+        collection box (the mirror is absent there, so an open-bottomed box
+        would leak the downward radiation).
+
+        Same keys as ``DummyCavity.emission_setup``.
+
+        Parameters
+        ----------
+        offset_nm : sequence of three floats, default: (0, 0, 0)
+            Displacement (nm) of the dipole from the gap hotspot.
+        component : Meep field component or None, optional
+            Dipole orientation. Default: ``mp.Ez``, along the gap field.
+        """
+
+        surface = self._radiated_flux_regions()  # the lid first, then the walls
+        lid = surface[0]
         boundary = self.pml_thickness
         distance_below_source = self.hotspot_center.z + 0.5 * self.cell_size.z
 
-        # reference boundaries are needed because the default geometry has no PML at -z.
+        # reference boundaries are needed because the default geometry has no
+        # PML at -z (the mirror is backed by the bottom wall)
         reference_boundaries = [
             mp.PML(thickness=boundary, direction=mp.Z, side=mp.High),
             mp.PML(
@@ -369,20 +453,49 @@ class NPoM(DummyCavity):
         ]
         reference_boundaries += (
             [mp.PML(thickness=boundary, direction=mp.R, side=mp.High)]
-            if self.dimensions == mp.CYLINDRICAL
+            if self.dimensions == CYLINDRICAL
             else [mp.PML(thickness=boundary, direction=axis) for axis in (mp.X, mp.Y)]
         )
 
+        # the closed reference box: the same lid, the walls extended down to
+        # z_bottom, and a bottom face there -- midway between the dipole and
+        # the inner edge of the reference PML below
+        z_bottom = self.hotspot_center.z - 0.25 * distance_below_source
+        z_top = lid.center.z
+        z_mid = 0.5 * (z_bottom + z_top)
+        if self.dimensions == CYLINDRICAL:
+            walls = [
+                mp.FluxRegion(
+                    center=mp.Vector3(surface[1].center.x, 0.0, z_mid),
+                    size=mp.Vector3(0.0, 0.0, z_top - z_bottom),
+                    direction=mp.R,
+                )
+            ]
+        else:
+            walls = [
+                mp.FluxRegion(
+                    center=mp.Vector3(face.center.x, face.center.y, z_mid),
+                    size=mp.Vector3(face.size.x, face.size.y, z_top - z_bottom),
+                    direction=face.direction,
+                    weight=face.weight,
+                )
+                for face in surface[1:]
+            ]
+        reference_surface = [lid] + walls + [self._box_bottom(lid, z_bottom)]
+
         return {
             # a point dipole at the gap center, polarized along the gap field
-            "excitation": {"center": self.hotspot_center, "size": mp.Vector3()},
-            # ``escaped`` is the complete radiating surface (top lid + lateral walls)
+            "excitation": {
+                "center": self.hotspot_center + self._offset_to_meep(offset_nm),
+                "size": mp.Vector3(),
+            },
+            # ``radiated`` is the complete radiating surface (lid + walls)
             "detectors": {
-                "escaped": surface,
+                "radiated": surface,
                 "top": surface[:1],
                 "lateral": surface[1:],
             },
-            "component": mp.Ez,
+            "component": component if component is not None else mp.Ez,
             "reference_geometry": [
                 mp.Block(
                     size=mp.Vector3(mp.inf, mp.inf, mp.inf),
@@ -390,6 +503,7 @@ class NPoM(DummyCavity):
                 )
             ],
             "reference_boundary_layers": reference_boundaries,
+            "reference_surface": reference_surface,
             # watch the ringdown a mode radius off the axis: on the dipole
             # itself the singular self-field collapses with the pulse and
             # would stop the run before the plasmon has rung down
@@ -412,8 +526,9 @@ class NPoM(DummyCavity):
         Create a disk of molecular medium inside the gap (grid-level coupling).
 
         The disk fills the spacer thickness and is centered at the hotspot
-        plus ``offset_nm``. Pass it to ``make_simulation`` via
-        ``extra_geometry=[region]``.
+        plus ``offset_nm``.
+
+        Pass it to ``make_simulation`` via ``extra_geometry=[region]``.
 
         Parameters
         ----------
@@ -453,16 +568,18 @@ class NPoM(DummyCavity):
         medium = self._socket_medium(
             epsilon, hub, rescaling_factor, **susceptibility_kwargs
         )
-        # record it so that plot() can draw the molecules
+        # record it so that plot() can draw the region
         self.placed_regions.append({"center": center, "size": size})
         return mp.Cylinder(material=medium, center=center, radius=radius, height=gap)
 
     def estimate_driver_count(self, region):
         """
         Estimate how many socket molecules (drivers) the gap disk of
-        ``place_region`` needs, equaling the number of FDTD grid points inside
-        it: a rectangle of the (r, z) half plane in cylindrical cells, and a
-        cylinder in 3D.
+        ``place_region`` needs, equal to the number of FDTD grid points
+        inside it.
+
+        The disk is a rectangle of the (r, z) half plane in cylindrical
+        cells, and a cylinder in 3D.
 
         Parameters
         ----------
@@ -477,6 +594,6 @@ class NPoM(DummyCavity):
 
         n_z = max(1.0, round(region.height * self.resolution))
         n_r = max(1.0, round(region.radius * self.resolution))
-        if self.dimensions == mp.CYLINDRICAL:
+        if self.dimensions == CYLINDRICAL:
             return int(n_z * n_r)
         return int(n_z * max(1.0, round(np.pi * n_r**2)))

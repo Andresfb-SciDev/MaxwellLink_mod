@@ -6,10 +6,7 @@
 # --------------------------------------------------------------------------------------#
 
 """
-Linear spectroscopy of an FDTD cavity:
-
-- ``MeepTransmissionSpectroscopy``: a plane wave crosses the structure for probing a mirror cavity.
-- ``MeepEmissionSpectroscopy``: a local source inside the cavity for probing a plasmonic nanocavity.
+Meep cavity linear spectroscopy: two FDTD runs per measurement.
 """
 
 import warnings
@@ -20,7 +17,7 @@ try:
     import meep as mp
 except ImportError:
     raise ImportError(
-        "The meep package is required for maxwelllink.measurements.meep_linear. "
+        "The meep package is required for maxwelllink.measurements. "
         "Please install it: https://meep.readthedocs.io/en/latest/Installation/."
     )
 
@@ -30,15 +27,20 @@ from .dummy_measurement import DummyMeasurement
 DECAY_CHECK_DT = 50
 
 
-class MeepTransmissionSpectroscopy(DummyMeasurement):
+class MeepCavityMeasurement(DummyMeasurement):
     """
-    Transmission/reflection spectroscopy of an FDTD cavity (two Meep runs).
+    Shared two-run machinery of every Meep cavity measurement.
 
-    Examples
-    --------
-    >>> from maxwelllink.measurements import MeepTransmissionSpectroscopy
-    >>> measurement = MeepTransmissionSpectroscopy(cavity, 2000.0, 2650.0, units="cm-1")
-    >>> spectrum = measurement.run()
+    Each measurement excites the system with one broadband Gaussian pulse and
+    performs two simulations that differ only in the structure:
+
+    1. ``reference()`` -- the normalization run on the ``"reference_geometry"``
+       of the cavity setup (no molecules, no ``extra_geometry``);
+    2. ``signal_run()`` -- the full cavity, plus molecules and
+       ``extra_geometry``.
+
+    Subclasses fetch and validate their setup dict in ``_cavity_setup`` and
+    implement the three ``DummyMeasurement`` steps on top of the helpers here.
     """
 
     decay_check_dt = DECAY_CHECK_DT
@@ -60,12 +62,14 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
         **meep_kwargs,
     ):
         """
-        Initialize the linear-spectroscopy measurement of an FDTD cavity.
+        Initialize a two-run Meep measurement of an FDTD cavity.
 
         Parameters
         ----------
         cavity : DummyCavity subclass
-            The cavity to probe; it must implement ``optical_setup()``.
+            The cavity to probe; it must provide the setup dict that
+            ``_cavity_setup`` fetches (``optical_setup()`` or
+            ``emission_setup()``).
         omega_min, omega_max : float
             Frequency window in ``units``.
         units : str, default: "cm-1"
@@ -81,21 +85,20 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
             Geometry appended to the signal run only, e.g. the region from
             ``place_region`` or a nanoparticle.
         decay_by : float, default: 1e-4
-            Stop each run once the detector fields have decayed to this
+            Stop each run once the monitored fields have decayed to this
             fraction of their peak.
         steps : int or None, optional
             Run each simulation for a fixed number of FDTD time steps
             instead of the decay criterion.
         max_time : float, default: 1e4
             Hard cap (Meep time units after the pulse) on the decay-based
-            stopping, with a warning when it triggers. Long-lived modes that
-            never reach the decay threshold (e.g. transverse guided modes of
-            a Bloch-periodic cell) would otherwise run forever; raise the cap
-            for very high-Q cavities.
+            stopping, with a warning when it triggers; raise it for very
+            high-Q cavities.
         min_time : float, default: 0.0
             Minimum Meep time to keep running after the pulse. A record of
-            length T resolves quality factors only up to about ``frequency * T``,
-            so raise this when a resonance comes out suspiciously broad.
+            length T resolves quality factors only up to about
+            ``frequency * T``, so raise this when a resonance comes out
+            suspiciously broad.
         **meep_kwargs
             Extra keyword arguments forwarded to both simulations (e.g.
             ``m=``).
@@ -105,7 +108,7 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
             omega_min, omega_max, units=units, nfreq=nfreq, molecules=molecules
         )
         self.cavity = cavity
-        self.setup = cavity.optical_setup()  # fails fast without optical access
+        self.setup = self._cavity_setup(cavity)  # fails fast on a wrong setup
         self.hub = hub
         self.extra_geometry = list(extra_geometry)
         self.decay_by = float(decay_by)
@@ -114,6 +117,10 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
         self.min_time = float(min_time)
         self.meep_kwargs = dict(meep_kwargs)
 
+        # incident fields at a detector, recorded by the reference run of the
+        # linear measurements and subtracted in their signal run
+        self._incident_flux_data = None
+
         # frequency window in Meep units (a = 1 um): f = omega_cminv * a / 1e7 nm
         f_lo = self.omega_min_cminv * cavity.length_units_nm * 1.0e-7
         f_hi = self.omega_max_cminv * cavity.length_units_nm * 1.0e-7
@@ -121,18 +128,27 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
         self.df = f_hi - f_lo
         self.freqs = np.linspace(f_lo, f_hi, self.nfreq)
 
-        # the incident fields at the reflection detector, recorded by the
-        # reference run and subtracted in the signal run
-        self._reflection_data = None
-
     # -------------- Meep helpers shared by the two runs --------------
 
+    def _cavity_setup(self, cavity):
+        """
+        Fetch and validate the setup dict of this measurement.
+
+        Notes
+        -----
+        This method *must be* overridden by subclasses.
+        """
+
+        raise NotImplementedError("This method should be overridden by subclasses.")
+
     def _sources(self):
-        """A broadband pulse through the excitation region (slightly wider
-        than the window so the band edges keep enough incident power). A
-        zero-size region makes it a point source."""
+        """
+        One broadband Gaussian pulse through the excitation region of the
+        setup (a zero-size region makes it a point source).
+        """
         return [
             mp.Source(
+                # slightly wider than the window so the band edges keep power
                 mp.GaussianSource(frequency=self.fcen, fwidth=1.3 * self.df),
                 component=self.setup["component"],
                 center=self.setup["excitation"]["center"],
@@ -140,12 +156,10 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
             )
         ]
 
-    def _decay_point(self):
-        """Where the stopping criterion watches the fields decay."""
-        return self.setup["detectors"]["transmission"]["center"]
-
     def _reference_simulation(self):
-        """Build the reference structure"""
+        """
+        Build the reference structure.
+        """
 
         kwargs = self.cavity.sim_kwargs()
         kwargs["geometry"] = list(self.setup["reference_geometry"])
@@ -156,7 +170,9 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
         return mp.Simulation(**kwargs)
 
     def _signal_simulation(self):
-        """The full cavity, plus molecules and ``extra_geometry``."""
+        """
+        The full cavity, plus molecules and ``extra_geometry``.
+        """
         return self.cavity.make_simulation(
             molecules=self.molecules,
             hub=self.hub,
@@ -165,22 +181,24 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
             **self.meep_kwargs,
         )
 
-    def _add_monitors(self, sim):
-        """Attach the reflection and transmission flux monitors."""
-        monitors = {}
-        for name in ("reflection", "transmission"):
-            plane = self.setup["detectors"][name]
-            monitors[name] = sim.add_flux(
-                self.fcen,
-                self.df,
-                self.nfreq,
-                mp.FluxRegion(center=plane["center"], size=plane["size"]),
+    def _subtract_incident(self, sim, monitor):
+        """
+        Subtract the incident fields recorded by the reference run from a flux
+        monitor of the signal run, so it records only the cavity response.
+        """
+        if self._incident_flux_data is None:
+            raise RuntimeError(
+                "Run reference() before signal_run(); run() does this automatically."
             )
-        return monitors["reflection"], monitors["transmission"]
+        sim.load_minus_flux_data(monitor, self._incident_flux_data)
 
     def _run_until_done(self, sim, *step_functions):
-        """Run for a fixed number of steps, or until the monitored fields
-        decay (capped at ``max_time`` after the pulse)."""
+        """
+        Run a simulation (with optional Meep step functions) for ``steps``
+        steps, or until the fields at the ``"decay_monitor"`` point of the
+        setup decay by ``decay_by``, capped at ``max_time`` after the pulse.
+        """
+
         if self.steps is not None:
             sim.run(
                 *step_functions,
@@ -188,19 +206,23 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
             )
             return
 
+        monitor_point = self.setup.get(
+            "decay_monitor", self.setup["excitation"]["center"]
+        )
         decayed = mp.stop_when_fields_decayed(
             self.decay_check_dt,
             self.setup["component"],
-            self._decay_point(),
+            monitor_point,
             self.decay_by,
         )
-        state = {}
+        t_end = t_floor = None
 
         def decayed_or_timed_out(sim_):
-            if "t_end" not in state:  # first check happens when the pulse ends
-                state["t_end"] = sim_.meep_time() + self.max_time
-                state["t_floor"] = sim_.meep_time() + self.min_time
-            if sim_.meep_time() >= state["t_end"]:
+            nonlocal t_end, t_floor
+            if t_end is None:  # first check happens when the pulse ends
+                t_end = sim_.meep_time() + self.max_time
+                t_floor = sim_.meep_time() + self.min_time
+            if sim_.meep_time() >= t_end:
                 warnings.warn(
                     "The detector fields had not decayed below decay_by within "
                     f"max_time = {self.max_time:g} Meep time units (long-lived "
@@ -209,27 +231,77 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
                     "Increase max_time, or pass steps= for full control."
                 )
                 return True
-            if sim_.meep_time() < state["t_floor"]:
+            if sim_.meep_time() < t_floor:
                 decayed(sim_)  # keep its running maximum up to date
                 return False
             return decayed(sim_)
 
         sim.run(*step_functions, until_after_sources=decayed_or_timed_out)
 
+
+class MeepTransmissionSpectroscopy(MeepCavityMeasurement):
+    """
+    Transmission/reflection spectroscopy of an FDTD cavity (two Meep runs).
+
+    A plane-wave pulse crosses the structure; the reference run records the
+    incident spectrum, and the signal run records what is transmitted and
+    reflected by the full cavity.
+
+    Examples
+    --------
+    >>> from maxwelllink.measurements import MeepTransmissionSpectroscopy
+    >>> measurement = MeepTransmissionSpectroscopy(cavity, 2000.0, 2650.0, units="cm-1")
+    >>> spectrum = measurement.run()
+    """
+
+    def _cavity_setup(self, cavity):
+        """
+        The plane-wave probe declared by ``cavity.optical_setup()``.
+        """
+
+        setup = cavity.optical_setup()
+        if setup.get("probe") != "transmission":
+            raise ValueError(
+                "MeepTransmissionSpectroscopy needs an optical_setup() with "
+                f"probe='transmission', but this cavity declares "
+                f"{setup.get('probe')!r}. For the local-dipole (Purcell) "
+                "measurement, call cavity.purcell() instead."
+            )
+        # the stopping criterion watches the transmitted fields by default
+        setup.setdefault("decay_monitor", setup["detectors"]["transmission"]["center"])
+        return setup
+
+    def _add_monitors(self, sim):
+        """
+        Attach the reflection and transmission flux monitors.
+        """
+        refl = self.setup["detectors"]["reflection"]
+        tran = self.setup["detectors"]["transmission"]
+        return (
+            sim.add_flux(
+                self.freqs, mp.FluxRegion(center=refl["center"], size=refl["size"])
+            ),
+            sim.add_flux(
+                self.freqs, mp.FluxRegion(center=tran["center"], size=tran["size"])
+            ),
+        )
+
     # -------------- the three measurement steps --------------
 
     def reference(self):
         """
         Normalization run: excite the reference structure (no molecules, no
-        ``extra_geometry``) and record the incident spectrum. The incident
-        fields at the reflection detector are stashed for the signal run.
+        ``extra_geometry``) and record the incident spectrum.
+
+        The incident fields at the reflection detector are stashed for the
+        signal run.
         """
 
         sim = self._reference_simulation()
         refl, tran = self._add_monitors(sim)
         self._run_until_done(sim)
 
-        self._reflection_data = sim.get_flux_data(refl)
+        self._incident_flux_data = sim.get_flux_data(refl)
         return {
             "frequency_meep": np.array(mp.get_flux_freqs(tran)),
             "incident": np.array(mp.get_fluxes(tran)),
@@ -238,17 +310,15 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
     def signal_run(self):
         """
         Scattering run: excite the full cavity (plus molecules and
-        ``extra_geometry``), with the incident wave subtracted at the
-        reflection detector so it records only what returns.
+        ``extra_geometry``).
+
+        The incident wave is subtracted at the reflection detector, so it
+        records only what returns.
         """
 
-        if self._reflection_data is None:
-            raise RuntimeError(
-                "Run reference() before signal_run(); run() does this " "automatically."
-            )
         sim = self._signal_simulation()
         refl, tran = self._add_monitors(sim)
-        sim.load_minus_flux_data(refl, self._reflection_data)
+        self._subtract_incident(sim, refl)
         self._run_until_done(sim)
 
         return {
@@ -257,7 +327,9 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
         }
 
     def postprocess(self, reference, signals):
-        """Divide the fluxes into the T, R, and A = 1 - T - R spectra."""
+        """
+        Divide the fluxes into the T, R, and A = 1 - T - R spectra.
+        """
 
         freqs = reference["frequency_meep"]
         transmission = signals["transmitted"] / reference["incident"]
@@ -271,92 +343,288 @@ class MeepTransmissionSpectroscopy(DummyMeasurement):
         )
 
 
-class MeepEmissionSpectroscopy(MeepTransmissionSpectroscopy):
+class MeepScatteringSpectroscopy(MeepCavityMeasurement):
     """
-    Emission spectroscopy of an FDTD cavity driven from the inside (two runs).
+    Scattering spectroscopy of a localized scatterer (two Meep runs).
 
-    For a plasmonic nanocavity, the probe is a local source at the field maximum,
-    and the detectors are closed surfaces. This is the classical-emitter method with which
-    Chikkaraddy et al., Nature 535, 127 (2016) extracted their gap plasmon.
+    The reference run excites the structure *without* the scatterer and
+    records the incident fields at the collection surface.
+
+    The signal run subtracts them, so the surface records scattered power only (the
+    dark-field-type probe of Chikkaraddy et al., Nature 535, 127 (2016)).
+
+    All observables are divided by the incident intensity at the cavity.
 
     Examples
     --------
     >>> from maxwelllink.cavity import NPoM
     >>> spectrum = NPoM().linear_spectrum(500.0, 900.0, units="nm")
-    >>> spectrum["wavelength_nm"], spectrum["escaped_spectrum"]
+    >>> spectrum["wavelength_nm"], spectrum["scattering"]
     """
 
-    # a plasmonic gap mode rings down in a few Meep time units, far faster
-    # than the high-Q mirror cavities
+    # a plasmonic mode rings down in a few Meep time units, far faster than
+    # the high-Q mirror cavities
     decay_check_dt = 10.0
 
-    def _decay_point(self):
-        return self.setup.get("decay_monitor", self.setup["excitation"]["center"])
+    def _cavity_setup(self, cavity):
+        """
+        The plane-wave scattering probe declared by ``optical_setup()``.
+        """
+
+        setup = cavity.optical_setup()
+        if setup.get("probe") != "scattering":
+            raise ValueError(
+                "MeepScatteringSpectroscopy needs an optical_setup() with "
+                f"probe='scattering', but this cavity declares "
+                f"{setup.get('probe')!r}."
+            )
+        for key in ("scattered", "absorption_box"):
+            if key not in setup["detectors"]:
+                raise ValueError(f"The scattering setup lacks the '{key}' detector.")
+        if "normalization" not in setup:
+            raise ValueError(
+                "The scattering setup lacks the 'normalization' region that "
+                "records the incident intensity."
+            )
+        if "reference_boundary_layers" in setup:
+            raise ValueError(
+                "The scattering probe must keep the cavity boundary layers in "
+                "the reference run (the incident-field subtraction needs "
+                "identical cells); remove 'reference_boundary_layers'."
+            )
+        return setup
 
     def _add_monitors(self, sim):
-        """One flux monitor per named detector surface."""
+        """
+        One monitor over the collection surface, one over the closed box.
+        """
+        scattered = sim.add_flux(self.freqs, *self.setup["detectors"]["scattered"])
+        box = sim.add_flux(self.freqs, *self.setup["detectors"]["absorption_box"])
+        return scattered, box
+
+    # -------------- the three measurement steps --------------
+
+    def reference(self):
+        """
+        Normalization run: excite the structure without the scatterer.
+
+        Records the incident spectrum ``|E_inc|^2`` at the hotspot, the
+        incident fields at the collection surface (stashed for the signal
+        run), and the net flux through the closed box.
+        """
+
+        sim = self._reference_simulation()
+        scattered, box = self._add_monitors(sim)
+        component = self.setup["component"]
+        norm = self.setup["normalization"]
+        # zero-size DFT monitors are unreliable in cylindrical cells, so the
+        # normalization region is a small finite line whose samples we average
+        probe = sim.add_dft_fields(
+            [component], self.freqs, center=norm["center"], size=norm["size"]
+        )
+        self._run_until_done(sim)
+
+        self._incident_flux_data = sim.get_flux_data(scattered)
+        incident = np.array(
+            [
+                np.mean(np.abs(sim.get_dft_array(probe, component, i)) ** 2)
+                for i in range(self.nfreq)
+            ]
+        )
         return {
-            name: sim.add_flux(self.fcen, self.df, self.nfreq, *regions)
-            for name, regions in self.setup["detectors"].items()
+            "frequency_meep": np.array(mp.get_flux_freqs(scattered)),
+            "incident": incident,
+            "box_flux": np.array(mp.get_fluxes(box)),
         }
 
-    def _record(self, sim):
-        """Attach the monitors, run, and read the emitted/radiated power."""
-        monitors = self._add_monitors(sim)
-        # mp.dft_ldos accumulates the power the source itself puts out
+    def signal_run(self):
+        """
+        Scattering run: excite the full structure.
+
+        The stored incident fields are subtracted at the collection surface
+        (scattered power only); the closed box keeps the total fields (for
+        the absorbed power).
+        """
+
+        sim = self._signal_simulation()
+        scattered, box = self._add_monitors(sim)
+        self._subtract_incident(sim, scattered)
+        self._run_until_done(sim)
+
+        return {
+            "scattered": np.array(mp.get_fluxes(scattered)),
+            "box_flux": np.array(mp.get_fluxes(box)),
+        }
+
+    def postprocess(self, reference, signals):
+        """
+        Combine the two runs into the scattering, absorption, and extinction
+        spectra, all divided by the incident intensity at the hotspot.
+        """
+
+        freqs = reference["frequency_meep"]
+        incident = reference["incident"]
+        scattering = signals["scattered"] / incident
+        absorption = -(signals["box_flux"] - reference["box_flux"]) / incident
+        return self._assemble_result(
+            1.0e7 * freqs / self.cavity.length_units_nm,
+            frequency_meep=freqs,
+            incident=incident,
+            scattering=scattering,
+            absorption=absorption,
+            extinction=scattering + absorption,
+        )
+
+
+class MeepPurcellSpectroscopy(MeepCavityMeasurement):
+    """
+    Purcell-factor spectroscopy of an FDTD cavity (two Meep runs).
+
+    A point dipole drives the full cavity in one run and the homogeneous
+    reference structure of ``emission_setup()`` in the other (the
+    classical-emitter method), and the observables are ratios of the two runs:
+
+    - ``purcell`` : total decay-rate enhancement, LDOS(cavity) / LDOS(reference);
+    - ``purcell_radiative`` : far-field enhancement, the power crossing the
+      ``"radiated"`` surface over the total power the reference dipole emits;
+    - ``radiative_efficiency`` : their ratio, the fraction of the emitted
+      power that reaches the far field.
+
+    Examples
+    --------
+    >>> from maxwelllink.cavity import NPoM
+    >>> spectrum = NPoM().purcell(500.0, 900.0, units="nm")
+    >>> spectrum["wavelength_nm"], spectrum["purcell"]
+    """
+
+    # dipole-driven modes ring down in a few Meep time units, far faster than
+    # the plane-wave runs of the high-Q mirror cavities
+    decay_check_dt = 10.0
+
+    def __init__(
+        self,
+        cavity,
+        omega_min,
+        omega_max,
+        units="cm-1",
+        offset_nm=(0.0, 0.0, 0.0),
+        component=None,
+        **kwargs,
+    ):
+        """
+        Initialize the Purcell measurement of an FDTD cavity.
+
+        Parameters
+        ----------
+        cavity : DummyCavity subclass
+            The cavity to probe; it must implement ``emission_setup()``.
+        omega_min, omega_max : float
+            Frequency window in ``units``.
+        units : str, default: "cm-1"
+            Units of the window: "cm-1", "eV", "au", "nm", or "um".
+        offset_nm : sequence of three floats, default: (0, 0, 0)
+            Displacement (nm) of the dipole from the cavity hotspot.
+        component : Meep field component or None, optional
+            Dipole orientation (e.g. ``mp.Er``). Default: the orientation
+            chosen by the cavity (``mp.Ez``).
+        **kwargs
+            Forwarded to ``MeepCavityMeasurement``: ``molecules``, ``hub``,
+            ``extra_geometry``, ``nfreq``, ``decay_by``, ``steps``,
+            ``max_time``, ``min_time``, and extra Meep keyword arguments.
+        """
+
+        # stored before super().__init__, whose _cavity_setup call needs it
+        self._emission_kwargs = dict(offset_nm=offset_nm, component=component)
+        super().__init__(cavity, omega_min, omega_max, units=units, **kwargs)
+
+    def _cavity_setup(self, cavity):
+        """
+        The local-dipole setup declared by ``cavity.emission_setup()``.
+        """
+
+        setup = cavity.emission_setup(**self._emission_kwargs)
+        if "radiated" not in setup.get("detectors", {}):
+            raise ValueError(
+                "emission_setup() must name a 'radiated' detector: the full "
+                "surface through which the cavity radiates."
+            )
+        if "reference_surface" not in setup:
+            raise ValueError(
+                "emission_setup() must provide a closed 'reference_surface' "
+                "that captures the total power the reference dipole radiates."
+            )
+        return setup
+
+    # -------------- the three measurement steps --------------
+
+    def reference(self):
+        """
+        Normalization run: drive the same dipole in the homogeneous reference
+        structure.
+
+        Records what the dipole emits (LDOS) and radiates through the closed
+        ``reference_surface`` (= everything it emits, the reference being
+        lossless).
+        """
+
+        sim = self._reference_simulation()
+        monitor = sim.add_flux(self.freqs, *self.setup["reference_surface"])
         self._run_until_done(sim, mp.dft_ldos(self.freqs))
 
-        any_monitor = next(iter(monitors.values()))
         return {
-            "frequency_meep": np.array(mp.get_flux_freqs(any_monitor)),
-            "emitted": np.array(sim.ldos_data),
+            "frequency_meep": np.array(mp.get_flux_freqs(monitor)),
+            "ldos": np.array(sim.ldos_data),
+            "radiated": np.array(mp.get_fluxes(monitor)),
+        }
+
+    def signal_run(self):
+        """
+        Cavity run: drive the full cavity (plus molecules and
+        ``extra_geometry``).
+
+        Records the emitted power together with the power crossing each
+        detector surface.
+        """
+
+        sim = self._signal_simulation()
+        monitors = {
+            name: sim.add_flux(self.freqs, *regions)
+            for name, regions in self.setup["detectors"].items()
+        }
+        self._run_until_done(sim, mp.dft_ldos(self.freqs))
+
+        return {
+            "ldos": np.array(sim.ldos_data),
             "radiated": {
                 name: np.array(mp.get_fluxes(monitor))
                 for name, monitor in monitors.items()
             },
         }
 
-    # -------------- the three measurement steps --------------
-
-    def reference(self):
-        """
-        Normalization run: drive the same source in the reference structure
-        (no molecules, no ``extra_geometry``) and record what it emits and
-        radiates there. Dividing by it turns the signal run into Purcell
-        factors, i.e. enhancements over the bare emitter.
-        """
-
-        return self._record(self._reference_simulation())
-
-    def signal_run(self):
-        """
-        Cavity run: drive the full cavity (plus molecules and
-        ``extra_geometry``) and record the total emitted power together with
-        the power crossing each detector surface.
-        """
-
-        return self._record(self._signal_simulation())
-
     def postprocess(self, reference, signals):
         """
-        Normalize cavity-defined detectors independently.
+        Combine the two runs into the Purcell observables.
+
+        Every spectrum is a ratio of the two runs, so all prefactors cancel.
         """
 
-        freqs = signals["frequency_meep"]
-        source = self._sources()[0].src
-        source_raw_power = (
-            np.abs(np.array([source.fourier_transform(freq) for freq in freqs])) ** 2
-        )
+        freqs = reference["frequency_meep"]
+        purcell = signals["ldos"] / reference["ldos"]
+        purcell_radiative = signals["radiated"]["radiated"] / reference["radiated"]
         observables = {
             "frequency_meep": freqs,
-            "source_raw_power": source_raw_power,
-            # total decay-rate enhancement of the emitter: the Purcell factor
-            "purcell": signals["emitted"] / reference["emitted"],
+            "purcell": purcell,
+            "purcell_radiative": purcell_radiative,
+            "radiative_efficiency": purcell_radiative / purcell,
+            "ldos": signals["ldos"],
+            "ldos_reference": reference["ldos"],
+            "radiated_flux": signals["radiated"]["radiated"],
+            "radiated_flux_reference": reference["radiated"],
         }
+        # raw flux through any extra named detector (e.g. "top", "lateral")
         for name, flux in signals["radiated"].items():
-            observables[f"{name}_raw_power"] = flux
-            observables[f"{name}_enhancement"] = flux / reference["radiated"][name]
-            observables[f"{name}_spectrum"] = flux / source_raw_power
+            if name != "radiated":
+                observables[f"{name}_flux"] = flux
         return self._assemble_result(
             1.0e7 * freqs / self.cavity.length_units_nm, **observables
         )

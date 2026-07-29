@@ -8,23 +8,26 @@
 """
 Light-induced measurements for the MaxwellLink EM solvers.
 
-Example
--------
->>> from maxwelllink.measurements import MeepTransmissionSpectroscopy
->>> spectrum = MeepTransmissionSpectroscopy(cavity, 2000.0, 2650.0, units="cm-1").run()
->>> spectrum["omega_cminv"], spectrum["transmission"]
-
-Cavities with no transmission port (e.g. a plasmonic ``NPoM``) name closed
-detector surfaces instead of transmission/reflection planes, and are probed
-by ``MeepEmissionSpectroscopy`` -- through the very same
-``cavity.linear_spectrum(...)`` call.
+- ``dummy_measurement.DummyMeasurement`` -- the solver-agnostic template
+  (reference / signal_run / postprocess, chained by ``run()``);
+- ``meep_linear`` -- Meep cavity spectroscopy: the shared two-run machinery
+  (``MeepCavityMeasurement``) and its subclasses
+  ``MeepTransmissionSpectroscopy``, ``MeepScatteringSpectroscopy``, and
+  ``MeepPurcellSpectroscopy``.
 """
 
 from .dummy_measurement import DummyMeasurement
-from .meep_linear import MeepEmissionSpectroscopy, MeepTransmissionSpectroscopy
+from .meep_linear import (
+    MeepCavityMeasurement,
+    MeepPurcellSpectroscopy,
+    MeepScatteringSpectroscopy,
+    MeepTransmissionSpectroscopy,
+)
 
 __all__ = [
     "DummyMeasurement",
+    "MeepCavityMeasurement",
     "MeepTransmissionSpectroscopy",
-    "MeepEmissionSpectroscopy",
+    "MeepScatteringSpectroscopy",
+    "MeepPurcellSpectroscopy",
 ]

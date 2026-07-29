@@ -19,6 +19,7 @@ class DummyMeasurement:
     the recorded response into user-facing observables.
 
     Every measurement splits into three steps:
+
     1. ``reference()`` -- the excitation baseline, computed analytically
        (e.g. the spectrum of a known laser pulse) or by a molecule-free
        reference simulation (e.g. the FDTD normalization run);
@@ -105,7 +106,7 @@ class DummyMeasurement:
 
         Notes
         -----
-        This method *must be* overridden by subclasses; implementations end
+        This method *must be* overridden by subclasses. Implementations end
         with ``return self._assemble_result(omega_cminv, **observables)``.
 
         Parameters
@@ -126,6 +127,10 @@ class DummyMeasurement:
         combination. Subclasses may pass state between the steps via
         attributes (e.g. fields recorded in the reference run).
 
+        Notes
+        -----
+        This method should *not* be overridden by subclasses.
+
         Returns
         -------
         dict
@@ -139,14 +144,7 @@ class DummyMeasurement:
     def _assemble_result(self, omega_cminv, **observables):
         """
         Return the standard result dict of every measurement: the frequency
-        axes plus the given observable arrays.
-
-        Parameters
-        ----------
-        omega_cminv : array-like
-            The frequency axis of the observables, in cm^-1.
-        **observables
-            Named observable arrays (e.g. ``transmission=...``).
+        axes (``omega_cminv`` in cm^-1) plus the named observable arrays.
         """
 
         omega_cminv = np.asarray(omega_cminv, dtype=float)

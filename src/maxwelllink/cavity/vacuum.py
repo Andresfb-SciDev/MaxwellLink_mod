@@ -5,9 +5,13 @@
 # See AGENTS.md and README.md for details.                                             #
 # --------------------------------------------------------------------------------------#
 
+"""
+Free space: an empty FDTD cell with absorbing (PML) boundaries.
+"""
+
 import meep as mp
 
-from .dummy_cavity import DummyCavity
+from .dummy_cavity import DummyCavity, CYLINDRICAL
 
 
 class Vacuum(DummyCavity):
@@ -16,21 +20,18 @@ class Vacuum(DummyCavity):
 
     Useful for spontaneous-emission and free-propagation tests.
 
-    All coupling and measurement methods are inherited from ``DummyCavity``
-    unchanged:
-    - ``place_molecule``: molecular poalrization density
-    - ``place_region``: arbitrary dielectric or metallic region
-    - ``optical_setup``: optical setup for the cavity measurements.
+    All placement and measurement methods are inherited from ``DummyCavity``
+    unchanged.
 
     Notes
     -----
-    With ``dimensions=mp.CYLINDRICAL`` the cell is an (r, z) half-plane: the
+    With ``dimensions=mxl.CYLINDRICAL`` the cell is an (r, z) half plane: the
     axis sits at r = 0, the allowed region spans r in [0, size_r] and
     z in [-size_z/2, +size_z/2].
 
-    Since the field of a z-polarized dipole on the axis has full rotational symmetry,
-    an m = 0 cylindrical run (``make_simulation(m=0)``) can reproduce 3D free-space physics
-    at 2D cost.
+    Since the field of a z-polarized dipole on the axis has full rotational
+    symmetry, an m = 0 cylindrical run (``make_simulation(m=0)``) reproduces
+    3D free-space physics at 2D cost.
 
     Examples
     --------
@@ -40,7 +41,7 @@ class Vacuum(DummyCavity):
     ...     omega=0.0106,  # driver parameters are in a.u.; ~2326 cm^-1
     ...     mu12=187.0, orientation=2, pe_initial=1e-4))
     >>> sim = cav.make_simulation(molecules=[mol])
-    >>> sim.run(steps=1000)
+    >>> sim.run(until=200)
     """
 
     def __init__(
@@ -68,7 +69,7 @@ class Vacuum(DummyCavity):
         units : str, default: "cm-1"
             Units of ``omega_ref``: "cm-1", "eV", "au", "nm", or "um".
         dimensions : int, default: 1
-            1, 2, 3, or mp.CYLINDRICAL.
+            1, 2, 3, or mxl.CYLINDRICAL.
         resolution : float or None, optional
             Meep resolution (pixels per Meep length unit). Default: 20 pixels
             per reference wavelength (the DummyCavity default).
@@ -88,8 +89,7 @@ class Vacuum(DummyCavity):
             if len(size_nm) != len(axes):
                 raise ValueError(
                     f"size_nm must be a scalar or a sequence of {len(axes)} "
-                    f"entries for a {self._dimensions_label()} cell "
-                    f"(active axes: {', '.join(axes)})."
+                    f"entries for this cell (active axes: {', '.join(axes)})."
                 )
             interior = [self.nm_to_meep(v) for v in size_nm]
 
@@ -99,7 +99,7 @@ class Vacuum(DummyCavity):
         # (default thickness: one reference wavelength)
         self.pml_thickness = self.nm_to_meep(pml_nm) if pml_nm is not None else lam
 
-        if self.dimensions == mp.CYLINDRICAL:
+        if self.dimensions == CYLINDRICAL:
             # the axis at r = 0 is not a boundary: the interior spans
             # r in [0, size_r], with PML at the outer r edge and both z ends
             self.cell_size = mp.Vector3(

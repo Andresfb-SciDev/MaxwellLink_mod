@@ -77,6 +77,11 @@ def __getattr__(name):
     if name == "measurements":
         return importlib.import_module(".measurements", __name__)
 
+    if name in {"CYLINDRICAL"}:
+        from .cavity.dummy_cavity import CYLINDRICAL
+
+        return CYLINDRICAL
+
     # Legacy code path (molecule_fast) kept for reference; prefer molecule_abstract + em_solvers/meep now.
     if name in {
         "TLSMolecule",

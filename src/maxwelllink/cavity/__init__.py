@@ -19,9 +19,9 @@ Example
 >>> sim.run(until=200)
 """
 
-from .dummy_cavity import DummyCavity
+from .dummy_cavity import DummyCavity, CYLINDRICAL
 from .vacuum import Vacuum
 from .bragg import BraggResonator
 from .npom import NPoM
 
-__all__ = ["DummyCavity", "Vacuum", "BraggResonator", "NPoM"]
+__all__ = ["DummyCavity", "Vacuum", "BraggResonator", "NPoM", "CYLINDRICAL"]

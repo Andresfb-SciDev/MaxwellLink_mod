@@ -104,80 +104,121 @@ def polish_axes(ax, xlabel=None, ylabel=None, despine=False):
 # -------------- cavity annotation helpers (draw onto an existing axes) -----
 
 
-def draw_optical_planes(cavity, ax, in_nm=True):
+def draw_optical_planes(cavity, ax, in_nm=True, setup=None):
     """
-    Draw the excitation and detector planes of ``cavity.optical_setup()`` as
-    labeled vertical lines.
+    Draw the excitation and detectors of a cavity measurement setup.
+
+    The drawing is structural: a zero-size excitation is a point source
+    (star), a finite one a plane or sheet (line/segment); a detector that is
+    a ``{"center", "size"}`` dict is a plane (line), and one that is a list
+    of ``mp.FluxRegion`` faces is outlined face by face.
 
     Parameters
     ----------
     cavity : DummyCavity subclass
-        The cavity whose optical setup is drawn.
+        The cavity whose setup is drawn.
     ax : matplotlib Axes
         The axes to draw into.
     in_nm : bool, default: True
         Whether the x-axis of ``ax`` is in nm (the 1D profile view) or in
         Meep units (the ``plot2D`` plan view).
+    setup : dict or None, optional
+        A pre-fetched setup dict (e.g. ``cavity.emission_setup()``).
+        Default: ``cavity.optical_setup()``.
     """
 
     import meep as mp
 
-    from ..cavity.dummy_cavity import is_emission_setup
-
-    try:
-        setup = cavity.optical_setup()
-    except NotImplementedError:
-        return
+    if setup is None:
+        try:
+            setup = cavity.optical_setup()
+        except NotImplementedError:
+            return
     # Cartesian planes vary along x (vertical lines); cylindrical planes
     # vary along z, the vertical axis of the r-z plan view (horizontal lines)
     cylindrical = cavity.dimensions == mp.CYLINDRICAL
     axis = "z" if cylindrical else "x"
     draw_line = ax.axhline if cylindrical else ax.axvline
+    # vertical axis of the plan view: y in 2D, z in 3D and cylindrical cells
+    vertical = "y" if cavity.dimensions == 2 else "z"
     scale = cavity.length_units_nm if in_nm else 1.0
     source = setup["excitation"]
-    if is_emission_setup(setup):
-        # a local source read out through closed surfaces, not two planes:
-        # mark the source point and outline every detector face
+    source_color = PLOT_COLORS["sky_blue" if in_nm else "yellow"]
+
+    if source["size"].norm() == 0.0 and not in_nm:
+        # a point source in the plan view: a star marker
         ax.plot(
-            scale * source["center"].x,
-            scale * getattr(source["center"], axis),
+            source["center"].x,
+            getattr(source["center"], vertical),
             marker="*",
-            color=PLOT_COLORS["sky_blue" if in_nm else "yellow"],
+            color=source_color,
             markersize=10,
             linestyle="none",
-            label="source",
+            label="excitation",
         )
-        for (name, regions), color in zip(setup["detectors"].items(), _DETECTOR_COLORS):
-            for i, region in enumerate(regions):
-                _draw_flux_region(
-                    ax, cavity, region, PLOT_COLORS[color], name if i == 0 else None
-                )
-        return
-    draw_line(
-        scale * getattr(source["center"], axis),
-        color=PLOT_COLORS["sky_blue" if in_nm else "yellow"],
-        linestyle="--" if not in_nm else "-.",
-        linewidth=1.5,
-        label="excitation",
-    )
-    for (name, plane), color in zip(setup["detectors"].items(), _DETECTOR_COLORS):
+    elif in_nm:
+        # the 1D profile view: every excitation is a line at its x position
         draw_line(
-            scale * getattr(plane["center"], axis),
-            color=PLOT_COLORS[color],
-            linestyle=":",
+            scale * getattr(source["center"], axis),
+            color=source_color,
+            linestyle="-.",
             linewidth=1.5,
-            label=name,
+            label="excitation",
+        )
+    else:
+        # a finite source in the plan view: the segment it spans (a
+        # transmission plane, or the grazing sheet of a scattering probe)
+        _draw_segment(
+            ax,
+            source["center"],
+            source["size"],
+            vertical,
+            source_color,
+            "--",
+            "excitation",
         )
 
+    for (name, value), color in zip(setup["detectors"].items(), _DETECTOR_COLORS):
+        if isinstance(value, dict):  # a plane with a center and a size
+            draw_line(
+                scale * getattr(value["center"], axis),
+                color=PLOT_COLORS[color],
+                linestyle=":",
+                linewidth=1.5,
+                label=name,
+            )
+        else:  # a list of flux-surface faces
+            for i, region in enumerate(value):
+                if in_nm:
+                    draw_line(
+                        scale * getattr(region.center, axis),
+                        color=PLOT_COLORS[color],
+                        linestyle=":",
+                        linewidth=1.5,
+                        label=name if i == 0 else None,
+                    )
+                else:
+                    _draw_segment(
+                        ax,
+                        region.center,
+                        region.size,
+                        vertical,
+                        PLOT_COLORS[color],
+                        ":",
+                        name if i == 0 else None,
+                    )
 
-def _draw_flux_region(ax, cavity, region, color, label):
-    """Draw one face of a detector surface in the r-z (or x-z) plan view."""
 
-    x0 = region.center.x - 0.5 * region.size.x
-    x1 = region.center.x + 0.5 * region.size.x
-    z0 = region.center.z - 0.5 * region.size.z
-    z1 = region.center.z + 0.5 * region.size.z
-    ax.plot([x0, x1], [z0, z1], color=color, linestyle=":", linewidth=1.5, label=label)
+def _draw_segment(ax, center, size, vertical, color, linestyle, label):
+    """Draw one plane/face as the segment it spans in the plan view."""
+
+    x0 = center.x - 0.5 * size.x
+    x1 = center.x + 0.5 * size.x
+    v0 = getattr(center, vertical) - 0.5 * getattr(size, vertical)
+    v1 = getattr(center, vertical) + 0.5 * getattr(size, vertical)
+    ax.plot(
+        [x0, x1], [v0, v1], color=color, linestyle=linestyle, linewidth=1.5, label=label
+    )
 
 
 def draw_molecules(cavity, ax, vertical=None):
@@ -239,7 +280,21 @@ def draw_molecules(cavity, ax, vertical=None):
 # -------------- assembled cavity views --------------
 
 
-def plot_cavity_1d(cavity, ax=None):
+def _fetch_setup(cavity, setup):
+    """Resolve the ``setup=`` argument of the ``plot_cavity`` family: the
+    optical (far-field) or the emission (local-dipole) setup dict."""
+
+    if setup == "optical":
+        try:
+            return cavity.optical_setup()
+        except NotImplementedError:
+            return None
+    if setup == "emission":
+        return cavity.emission_setup()
+    raise ValueError(f"setup must be 'optical' or 'emission', not {setup!r}.")
+
+
+def plot_cavity_1d(cavity, ax=None, setup="optical"):
     """
     Draw the 1D view of a cavity with a refractive-index profile n(x)
 
@@ -249,6 +304,9 @@ def plot_cavity_1d(cavity, ax=None):
         The cavity to draw (its x-axis, in nm).
     ax : matplotlib Axes or None, optional
         Axes to draw into. A new figure is created when None.
+    setup : str, default: "optical"
+        Which measurement setup to draw: the far-field probe ("optical") or
+        the local-dipole one ("emission").
 
     Returns
     -------
@@ -305,13 +363,13 @@ def plot_cavity_1d(cavity, ax=None):
             linewidth=1.5,
             label="hotspot",
         )
-        draw_optical_planes(cavity, ax, in_nm=True)
+        draw_optical_planes(cavity, ax, in_nm=True, setup=_fetch_setup(cavity, setup))
         ax.plot(x_nm, np.sqrt(eps), color=PLOT_COLORS["navy_blue"], linewidth=1.8)
         polish_axes(ax, xlabel="x (nm)", ylabel="refractive index n")
     return ax
 
 
-def plot_cavity_2d(cavity, ax=None, **kwargs):
+def plot_cavity_2d(cavity, ax=None, setup="optical", **kwargs):
     """
     Draw the plan view of a cavity via ``mp.Simulation.plot2D`` (2D, 3D, and cylindrical cells).
     In 3D the default view is the x-z plane through the cell center (override with ``output_plane=``).
@@ -322,6 +380,9 @@ def plot_cavity_2d(cavity, ax=None, **kwargs):
         The cavity to draw.
     ax : matplotlib Axes or None, optional
         Axes to draw into. A new figure is created when None.
+    setup : str, default: "optical"
+        Which measurement setup to draw: the far-field probe ("optical") or
+        the local-dipole one ("emission").
     **kwargs
         Forwarded to ``mp.Simulation.plot2D``.
 
@@ -340,7 +401,7 @@ def plot_cavity_2d(cavity, ax=None, **kwargs):
             )
         sim = mp.Simulation(**cavity.sim_kwargs())
         ax = sim.plot2D(ax=ax, **kwargs)
-        draw_optical_planes(cavity, ax, in_nm=False)
+        draw_optical_planes(cavity, ax, in_nm=False, setup=_fetch_setup(cavity, setup))
         # vertical axis of the plotted plane: y in 2D, z in the 3D default
         # view and in the cylindrical r-z plane
         draw_molecules(cavity, ax, vertical="y" if cavity.dimensions == 2 else "z")
@@ -348,7 +409,7 @@ def plot_cavity_2d(cavity, ax=None, **kwargs):
     return ax
 
 
-def plot_cavity(cavity, ax=None, **kwargs):
+def plot_cavity(cavity, ax=None, setup="optical", **kwargs):
     """
     Visualize a cavity in MEEP cavity module (src/maxwelllink/cavity/).
 
@@ -358,6 +419,9 @@ def plot_cavity(cavity, ax=None, **kwargs):
         The cavity to draw.
     ax : matplotlib Axes or None, optional
         Axes to draw into. A new figure is created when None.
+    setup : str, default: "optical"
+        Which measurement setup to draw: the far-field probe ("optical") or
+        the local-dipole one ("emission").
     **kwargs
         Forwarded to ``mp.Simulation.plot2D`` in the plan view.
 
@@ -370,5 +434,5 @@ def plot_cavity(cavity, ax=None, **kwargs):
     import meep as mp
 
     if cavity.dimensions > 1 or cavity.dimensions == mp.CYLINDRICAL:
-        return plot_cavity_2d(cavity, ax=ax, **kwargs)
-    return plot_cavity_1d(cavity, ax=ax)
+        return plot_cavity_2d(cavity, ax=ax, setup=setup, **kwargs)
+    return plot_cavity_1d(cavity, ax=ax, setup=setup)
