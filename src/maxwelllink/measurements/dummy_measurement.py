@@ -20,13 +20,11 @@ class DummyMeasurement:
 
     Every measurement splits into three steps:
 
-    1. ``reference()`` -- the excitation baseline, computed analytically
+    1. ``reference()``: the excitation baseline, computed analytically
        (e.g. the spectrum of a known laser pulse) or by a molecule-free
        reference simulation (e.g. the FDTD normalization run);
-    2. ``signal_run()`` -- excite the full system and collect the raw
-       response signals;
-    3. ``postprocess(reference, signals)`` -- combine both into the
-       observable arrays.
+    2. ``signal_run()``: excite the full system and collect the raw response signals;
+    3. ``postprocess(reference, signals)``: combine both into the observable arrays.
 
     ``run()`` chains the three steps and is the single user-facing entry point.
     """

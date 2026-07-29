@@ -19,7 +19,7 @@ from .dummy_cavity import DummyCavity, CYLINDRICAL
 
 # the geometry of Chikkaraddy et al., Nature 535, 127 (2016)
 RADIUS_NM = 20.0  # gold nanoparticle of 40 nm diameter
-GAP_NM = 0.9  # cucurbit[7]uril spacer that hosts the molecule
+GAP_NM = 1.0  # cucurbit[7]uril spacer that hosts the molecule
 SPACER_INDEX = 1.4  # refractive index of the cucurbit[7]uril monolayer
 FILM_NM = 70.0  # evaporated gold mirror (~5 skin depths at 660 nm)
 
@@ -60,7 +60,7 @@ class NPoM(DummyCavity):
     Examples
     --------
     >>> from maxwelllink.cavity import NPoM
-    >>> cav = NPoM(resolution=3334.0)  # the paper's converged 0.3 nm mesh
+    >>> cav = NPoM(resolution=5000.0)
     >>> spectrum = cav.linear_spectrum(500.0, 900.0, units="nm", min_time=30.0)
     >>> lam, scattering = spectrum["wavelength_nm"], spectrum["scattering"]
     >>> enhancement = cav.purcell(500.0, 900.0, units="nm", min_time=30.0)
@@ -87,8 +87,8 @@ class NPoM(DummyCavity):
         Parameters
         ----------
         radius_nm : float, default: 20.0
-            Radius (nm) of the gold nanosphere (the paper: 40 nm diameter).
-        gap_nm : float, default: 0.9
+            Radius (nm) of the gold nanosphere (40 nm diameter).
+        gap_nm : float, default: 1.0
             Thickness (nm) of the spacer between the particle and the mirror.
         spacer_index : float, default: 1.4
             Refractive index of the spacer layer, which extends laterally
@@ -436,66 +436,103 @@ class NPoM(DummyCavity):
             Dipole orientation. Default: ``mp.Ez``, along the gap field.
         """
 
+        source_component = component if component is not None else mp.Ez
+        excitation = {
+            "center": self.hotspot_center + self._offset_to_meep(offset_nm),
+            "size": mp.Vector3(),
+        }
         surface = self._radiated_flux_regions()  # the lid first, then the walls
-        lid = surface[0]
-        boundary = self.pml_thickness
-        distance_below_source = self.hotspot_center.z + 0.5 * self.cell_size.z
 
-        # reference boundaries are needed because the default geometry has no
-        # PML at -z (the mirror is backed by the bottom wall)
-        reference_boundaries = [
-            mp.PML(thickness=boundary, direction=mp.Z, side=mp.High),
-            mp.PML(
-                thickness=0.5 * distance_below_source,
-                direction=mp.Z,
-                side=mp.Low,
-            ),
-        ]
-        reference_boundaries += (
-            [mp.PML(thickness=boundary, direction=mp.R, side=mp.High)]
-            if self.dimensions == CYLINDRICAL
-            else [mp.PML(thickness=boundary, direction=axis) for axis in (mp.X, mp.Y)]
-        )
+        # The homogeneous reference has its own inexpensive, symmetric cell.
+        # Its PML starts half a reference wavelength from the dipole, and the
+        # closed flux surface remains strictly inside that non-PML region.
+        reference_wavelength = self.nm_to_meep(self.wavelength_nm)
+        reference_resolution = min(self.resolution, 200.0)
+        reference_pml = 0.5 * reference_wavelength
+        reference_padding = 0.5 * reference_wavelength
+        reference_half_extent = reference_padding + reference_pml
+        monitor_half_extent = 0.8 * reference_padding
+        reference_center = excitation["center"]
+        reference_boundaries = [mp.PML(thickness=reference_pml)]
 
-        # the closed reference box: the same lid, the walls extended down to
-        # z_bottom, and a bottom face there -- midway between the dipole and
-        # the inner edge of the reference PML below
-        z_bottom = self.hotspot_center.z - 0.25 * distance_below_source
-        z_top = lid.center.z
-        z_mid = 0.5 * (z_bottom + z_top)
         if self.dimensions == CYLINDRICAL:
-            walls = [
+            reference_cell = mp.Vector3(
+                reference_half_extent,
+                0.0,
+                2.0 * reference_half_extent,
+            )
+            z_bottom = reference_center.z - monitor_half_extent
+            z_top = reference_center.z + monitor_half_extent
+            lid = mp.FluxRegion(
+                center=mp.Vector3(0.5 * monitor_half_extent, 0.0, z_top),
+                size=mp.Vector3(monitor_half_extent, 0.0, 0.0),
+                direction=mp.Z,
+            )
+            reference_surface = [
+                lid,
                 mp.FluxRegion(
-                    center=mp.Vector3(surface[1].center.x, 0.0, z_mid),
-                    size=mp.Vector3(0.0, 0.0, z_top - z_bottom),
+                    center=mp.Vector3(
+                        monitor_half_extent, 0.0, reference_center.z
+                    ),
+                    size=mp.Vector3(0.0, 0.0, 2.0 * monitor_half_extent),
                     direction=mp.R,
-                )
+                ),
+                self._box_bottom(lid, z_bottom),
             ]
         else:
-            walls = [
-                mp.FluxRegion(
-                    center=mp.Vector3(face.center.x, face.center.y, z_mid),
-                    size=mp.Vector3(face.size.x, face.size.y, z_top - z_bottom),
-                    direction=face.direction,
-                    weight=face.weight,
+            reference_cell = mp.Vector3(
+                2.0 * reference_half_extent,
+                2.0 * reference_half_extent,
+                2.0 * reference_half_extent,
+            )
+            reference_surface = []
+            center = [reference_center.x, reference_center.y, reference_center.z]
+            for index, direction in enumerate((mp.X, mp.Y, mp.Z)):
+                size = [2.0 * monitor_half_extent] * 3
+                size[index] = 0.0
+                for sign in (+1.0, -1.0):
+                    face_center = list(center)
+                    face_center[index] += sign * monitor_half_extent
+                    reference_surface.append(
+                        mp.FluxRegion(
+                            center=mp.Vector3(*face_center),
+                            size=mp.Vector3(*size),
+                            direction=direction,
+                            weight=sign,
+                        )
+                    )
+
+        reference_simulation_kwargs = {
+            "cell_size": reference_cell,
+            "geometry_center": reference_center,
+            "resolution": reference_resolution,
+        }
+
+        # Meep's homogeneous-medium LDOS in the cavity-grid normalization.
+        # The numerical cylindrical reference is converted to this same
+        # resolution before the Purcell ratio is formed.
+        def ldos_reference_analytical(freqs):
+            freqs = np.asarray(freqs, dtype=float)
+            if self.dimensions == CYLINDRICAL:
+                return (
+                    2.0
+                    * np.pi
+                    * self.spacer_index
+                    * freqs**2
+                    / (3.0 * self.resolution)
                 )
-                for face in surface[1:]
-            ]
-        reference_surface = [lid] + walls + [self._box_bottom(lid, z_bottom)]
+            return 4.0 * self.spacer_index * freqs**2 / 3.0
 
         return {
             # a point dipole at the gap center, polarized along the gap field
-            "excitation": {
-                "center": self.hotspot_center + self._offset_to_meep(offset_nm),
-                "size": mp.Vector3(),
-            },
+            "excitation": excitation,
             # ``radiated`` is the complete radiating surface (lid + walls)
             "detectors": {
                 "radiated": surface,
                 "top": surface[:1],
                 "lateral": surface[1:],
             },
-            "component": component if component is not None else mp.Ez,
+            "component": source_component,
             "reference_geometry": [
                 mp.Block(
                     size=mp.Vector3(mp.inf, mp.inf, mp.inf),
@@ -503,12 +540,14 @@ class NPoM(DummyCavity):
                 )
             ],
             "reference_boundary_layers": reference_boundaries,
+            "reference_simulation_kwargs": reference_simulation_kwargs,
             "reference_surface": reference_surface,
             # watch the ringdown a mode radius off the axis: on the dipole
             # itself the singular self-field collapses with the pulse and
             # would stop the run before the plasmon has rung down
             "decay_monitor": self.hotspot_center
             + mp.Vector3(self.nm_to_meep(self.predicted["mode_radius_nm"]), 0.0),
+            "ldos_reference_analytical": ldos_reference_analytical,
         }
 
     # -------------- grid-level coupling --------------

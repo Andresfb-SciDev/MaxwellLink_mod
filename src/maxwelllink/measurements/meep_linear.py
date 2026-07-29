@@ -34,10 +34,9 @@ class MeepCavityMeasurement(DummyMeasurement):
     Each measurement excites the system with one broadband Gaussian pulse and
     performs two simulations that differ only in the structure:
 
-    1. ``reference()`` -- the normalization run on the ``"reference_geometry"``
+    1. ``reference()``: the normalization run on the ``"reference_geometry"``
        of the cavity setup (no molecules, no ``extra_geometry``);
-    2. ``signal_run()`` -- the full cavity, plus molecules and
-       ``extra_geometry``.
+    2. ``signal_run()``: the full cavity, plus molecules and ``extra_geometry``.
 
     Subclasses fetch and validate their setup dict in ``_cavity_setup`` and
     implement the three ``DummyMeasurement`` steps on top of the helpers here.
@@ -55,7 +54,7 @@ class MeepCavityMeasurement(DummyMeasurement):
         molecules=None,
         hub=None,
         extra_geometry=(),
-        decay_by=1.0e-4,
+        decay_by=1.0e-6,
         steps=None,
         max_time=1.0e4,
         min_time=0.0,
@@ -84,7 +83,7 @@ class MeepCavityMeasurement(DummyMeasurement):
         extra_geometry : sequence, optional
             Geometry appended to the signal run only, e.g. the region from
             ``place_region`` or a nanoparticle.
-        decay_by : float, default: 1e-4
+        decay_by : float, default: 1e-6
             Stop each run once the monitored fields have decayed to this
             fraction of their peak.
         steps : int or None, optional
@@ -149,7 +148,7 @@ class MeepCavityMeasurement(DummyMeasurement):
         return [
             mp.Source(
                 # slightly wider than the window so the band edges keep power
-                mp.GaussianSource(frequency=self.fcen, fwidth=1.3 * self.df),
+                mp.GaussianSource(frequency=self.fcen, fwidth=2.7 * self.df),
                 component=self.setup["component"],
                 center=self.setup["excitation"]["center"],
                 size=self.setup["excitation"]["size"],
@@ -162,6 +161,7 @@ class MeepCavityMeasurement(DummyMeasurement):
         """
 
         kwargs = self.cavity.sim_kwargs()
+        kwargs.update(self.setup.get("reference_simulation_kwargs", {}))
         kwargs["geometry"] = list(self.setup["reference_geometry"])
         if "reference_boundary_layers" in self.setup:
             kwargs["boundary_layers"] = list(self.setup["reference_boundary_layers"])
@@ -192,23 +192,25 @@ class MeepCavityMeasurement(DummyMeasurement):
             )
         sim.load_minus_flux_data(monitor, self._incident_flux_data)
 
-    def _run_until_done(self, sim, *step_functions):
+    def _run_until_done(self, sim, *step_functions, monitor_point=None):
         """
         Run a simulation (with optional Meep step functions) for ``steps``
-        steps, or until the fields at the ``"decay_monitor"`` point of the
-        setup decay by ``decay_by``, capped at ``max_time`` after the pulse.
+        steps, or until the fields at ``monitor_point`` decay by ``decay_by``,
+        capped at ``max_time`` after the pulse. By default, watch the setup's
+        ``"decay_monitor"`` or the excitation center.
         """
 
         if self.steps is not None:
             sim.run(
                 *step_functions,
-                until=float(self.steps) * sim.Courant / self.cavity.resolution,
+                until=float(self.steps) * sim.Courant / sim.resolution,
             )
             return
 
-        monitor_point = self.setup.get(
-            "decay_monitor", self.setup["excitation"]["center"]
-        )
+        if monitor_point is None:
+            monitor_point = self.setup.get(
+                "decay_monitor", self.setup["excitation"]["center"]
+            )
         decayed = mp.stop_when_fields_decayed(
             self.decay_check_dt,
             self.setup["component"],
@@ -569,12 +571,25 @@ class MeepPurcellSpectroscopy(MeepCavityMeasurement):
 
         sim = self._reference_simulation()
         monitor = sim.add_flux(self.freqs, *self.setup["reference_surface"])
-        self._run_until_done(sim, mp.dft_ldos(self.freqs))
+        self._run_until_done(
+            sim,
+            mp.dft_ldos(self.freqs),
+            monitor_point=self.setup["excitation"]["center"],
+        )
 
+        ldos_reference = np.array(sim.ldos_data)
+        radiated_reference = np.array(mp.get_fluxes(monitor))
+        if self.cavity.dimensions == mp.CYLINDRICAL:
+            signal_resolution = float(
+                self.meep_kwargs.get("resolution", self.cavity.resolution)
+            )
+            resolution_ratio = float(sim.resolution) / signal_resolution
+            ldos_reference *= resolution_ratio
+            radiated_reference *= resolution_ratio**2
         return {
             "frequency_meep": np.array(mp.get_flux_freqs(monitor)),
-            "ldos": np.array(sim.ldos_data),
-            "radiated": np.array(mp.get_fluxes(monitor)),
+            "ldos": ldos_reference,
+            "radiated": radiated_reference,
         }
 
     def signal_run(self):
@@ -621,6 +636,13 @@ class MeepPurcellSpectroscopy(MeepCavityMeasurement):
             "radiated_flux": signals["radiated"]["radiated"],
             "radiated_flux_reference": reference["radiated"],
         }
+        # optionally add the analytical reference ldos if the setup contains one
+        if "ldos_reference_analytical" in self.setup:
+            # this is a callable function
+            observables["ldos_reference_analytical"] = self.setup[
+                "ldos_reference_analytical"
+            ](freqs)
+
         # raw flux through any extra named detector (e.g. "top", "lateral")
         for name, flux in signals["radiated"].items():
             if name != "radiated":

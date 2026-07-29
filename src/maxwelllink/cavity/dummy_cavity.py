@@ -600,6 +600,9 @@ class DummyCavity:
           reference run, capturing the total emitted power;
         - ``"reference_boundary_layers"`` : optional boundary layers of the
           reference run;
+        - ``"reference_simulation_kwargs"`` : optional reference-only Meep
+          parameters such as ``cell_size``, ``geometry_center``, and
+          ``resolution`` for reducing the reference computational cost;
         - ``"decay_monitor"`` : optional ``mp.Vector3`` watched by the
           stopping criterion, kept away from the singular dipole self-field.
 
