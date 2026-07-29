@@ -103,7 +103,7 @@ class NPoM(DummyCavity):
             Units of ``omega_ref``: "cm-1", "eV", "au", "nm", or "um".
         material : mp.Medium or None, optional
             Material of the particle and the mirror. Default: gold
-            (``meep.materials.Au``).
+            (``meep.materials.Au_JC_visible``).
         dimensions : int, default: mxl.CYLINDRICAL
             ``mxl.CYLINDRICAL`` for the (r, z) half plane, where the cavity
             sets ``m = 0`` (the sector holding the gap mode), or 3 for full
@@ -139,9 +139,9 @@ class NPoM(DummyCavity):
 
         is_default_gold = material is None
         if is_default_gold:
-            from meep.materials import Au  # 1-um units: compatible directly
+            from meep.materials import Au_JC_visible  # 1-um units: compatible directly
 
-            material = Au
+            material = Au_JC_visible
         self.material = material
 
         # -------------- the stack along z (Meep units: um) --------------
