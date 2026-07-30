@@ -133,16 +133,22 @@ class NPoM(DummyCavity):
         Notes
         -----
         The default cell is not good enough for linear spectrum and purcell
-        measurements over a wide wavelength range.
+        measurements over a wide wavelength range, especially for cylindrical cells.
+
+        # TOY MODEL RUNNING IN LOCAL MACHINES:
+        20-radius nm and 1 nm gap particle, 500-900 nm measurement window:
+        ``NPoM(padding_nm=150.0, pml_nm=250.0)``, resolution 1000.
+
+        # PRACTICAL CALCULATIONS FOR NATURE 2016 PAPER:
+        20-radius nm and 1 nm gap particle, 500-800 nm measurement window:
+        - Linear scattering spectrum: ``NPoM(padding_nm=300.0, pml_nm=300.0)``, resolution 4000. 
+        - Purcell factor: ``NPoM(padding_nm=500.0, pml_nm=700.0)``, resolution 4000.
 
         For converged spectra, size the cell from the *reddest* wavelength 
         ``lam_max`` of the window to be measured:
 
             padding_nm >= 0.75 * lam_max - radius_nm
             pml_nm     >= 0.9  * lam_max
-
-        For a 500-800 nm measurement window and the default 20-radius nm particle: 
-        set ``NPoM(padding_nm=580.0, pml_nm=720.0)``. 
         
         Half of it is enough when ``linear_spectrum`` is only used for the 
         resonance position and linewidth, while the full value is needed for 
