@@ -16,6 +16,7 @@ import numpy as np
 import meep as mp
 
 from .dummy_cavity import DummyCavity, CYLINDRICAL
+from ..units import wavelength_nm_from_omega
 
 # the geometry of Chikkaraddy et al., Nature 535, 127 (2016)
 RADIUS_NM = 20.0  # gold nanoparticle of 40 nm diameter
@@ -40,6 +41,13 @@ GAP_PIXELS = 6.0
 PADDING_FRACTION = 0.15
 BOUNDARY_FRACTION = 0.25
 
+# the emission (Purcell) probe measures the field at the dipole itself, so
+# its boundary layers must stay outside the reactive near zone of the gap
+# antenna at the reddest probed wavelength; a too-close absorber loads the
+# dipole and adds a spurious rising long-wavelength tail to the total LDOS
+EMISSION_CLEARANCE_FRACTION = 0.75  # (radius + padding) per reddest wavelength
+EMISSION_BOUNDARY_FRACTION = 0.9  # boundary thickness per reddest wavelength
+
 
 class NPoM(DummyCavity):
     """
@@ -56,6 +64,9 @@ class NPoM(DummyCavity):
 
     The paper's dark-field scattering spectrum comes from ``linear_spectrum``
     and its classical-emitter Purcell spectrum from ``purcell``.
+
+    ``purcell`` enlarges the cell automatically when the requested window
+    needs more free space than the compact default (see its docstring).
 
     Examples
     --------
@@ -158,6 +169,11 @@ class NPoM(DummyCavity):
         )
         boundary = self.pml_thickness
         self.padding = pad  # free space between the particle and the boundary
+
+        # the reddest wavelength the local-dipole (Purcell) probe must
+        # support; purcell() updates it from the requested window before
+        # the measurement runs
+        self.emission_lambda_max_nm = self.wavelength_nm
 
         # the cell is centered on the origin (the Meep convention), and the
         # mirror is backed by the bottom wall, so the stack sits below center:
@@ -444,9 +460,10 @@ class NPoM(DummyCavity):
         surface = self._radiated_flux_regions()  # the lid first, then the walls
 
         # The homogeneous reference has its own inexpensive, symmetric cell.
-        # Its PML starts half a reference wavelength from the dipole, and the
-        # closed flux surface remains strictly inside that non-PML region.
-        reference_wavelength = self.nm_to_meep(self.wavelength_nm)
+        # Its PML starts half the reddest probed wavelength from the dipole,
+        # and the closed flux surface remains strictly inside that non-PML
+        # region.
+        reference_wavelength = self.nm_to_meep(self.emission_lambda_max_nm)
         reference_resolution = min(self.resolution, 200.0)
         reference_pml = 0.5 * reference_wavelength
         reference_padding = 0.5 * reference_wavelength
@@ -471,9 +488,7 @@ class NPoM(DummyCavity):
             reference_surface = [
                 lid,
                 mp.FluxRegion(
-                    center=mp.Vector3(
-                        monitor_half_extent, 0.0, reference_center.z
-                    ),
+                    center=mp.Vector3(monitor_half_extent, 0.0, reference_center.z),
                     size=mp.Vector3(0.0, 0.0, 2.0 * monitor_half_extent),
                     direction=mp.R,
                 ),
@@ -515,11 +530,7 @@ class NPoM(DummyCavity):
             freqs = np.asarray(freqs, dtype=float)
             if self.dimensions == CYLINDRICAL:
                 return (
-                    2.0
-                    * np.pi
-                    * self.spacer_index
-                    * freqs**2
-                    / (3.0 * self.resolution)
+                    2.0 * np.pi * self.spacer_index * freqs**2 / (3.0 * self.resolution)
                 )
             return 4.0 * self.spacer_index * freqs**2 / 3.0
 
@@ -549,6 +560,119 @@ class NPoM(DummyCavity):
             + mp.Vector3(self.nm_to_meep(self.predicted["mode_radius_nm"]), 0.0),
             "ldos_reference_analytical": ldos_reference_analytical,
         }
+
+    def purcell(
+        self,
+        omega_min,
+        omega_max,
+        units="cm-1",
+        offset_nm=(0.0, 0.0, 0.0),
+        component=None,
+        auto_enlarge=True,
+        **kwargs,
+    ):
+        """
+        Compute the Purcell spectrum of the NPoM, with ``auto_enlarge=True``
+        for a larger cell for Purcell calculations.
+
+        The total (LDOS) Purcell factor probes the field at the dipole
+        itself, so the boundary layers must stay outside the reactive near
+        zone of the gap antenna at the reddest requested wavelength;
+        otherwise they load the dipole and the spectrum grows a spurious
+        rising long-wavelength tail.
+
+        Other calculations keep the original compact cell.
+
+        Parameters
+        ----------
+        omega_min, omega_max : float
+            Frequency window in ``units``.
+        units : str, default: "cm-1"
+            Units of the window: "cm-1", "eV", "au", "nm", or "um".
+        offset_nm : sequence of three floats, default: (0, 0, 0)
+            Displacement (nm) of the dipole from the gap hotspot.
+        component : Meep field component or None, optional
+            Dipole orientation. Default: ``mp.Ez``, along the gap field.
+        auto_enlarge : bool, default: True
+            Rebuild the cell when it is too small for the window. Pass
+            False to keep the current cell (with a warning); the total
+            Purcell spectrum is then unreliable at long wavelengths.
+        **kwargs
+            Forwarded to ``DummyCavity.purcell`` (e.g. ``nfreq``,
+            ``min_time``).
+
+        Returns
+        -------
+        dict
+            Same observables as ``DummyCavity.purcell``.
+        """
+
+        # the reddest wavelength of the window sets the required free space
+        lambda_max_nm = max(
+            wavelength_nm_from_omega(omega_min, units),
+            wavelength_nm_from_omega(omega_max, units),
+        )
+        padding_nm = self.meep_to_nm(self.padding)
+        boundary_nm = self.meep_to_nm(self.pml_thickness)
+        padding_needed = EMISSION_CLEARANCE_FRACTION * lambda_max_nm - self.radius_nm
+        boundary_needed = EMISSION_BOUNDARY_FRACTION * lambda_max_nm
+        # the tolerance guards the nm <-> um round trip of the rebuilt cell
+        cell_too_small = (
+            padding_nm < padding_needed - 1.0e-6
+            or boundary_nm < boundary_needed - 1.0e-6
+        )
+
+        if cell_too_small and auto_enlarge:
+            padding_new = max(padding_nm, padding_needed)
+            boundary_new = max(boundary_nm, boundary_needed)
+            warnings.warn(
+                f"The Purcell window reaches {lambda_max_nm:.0f} nm, so the "
+                f"emission cell is enlarged to padding = {padding_new:.0f} "
+                f"nm and boundary = {boundary_new:.0f} nm (the compact cell "
+                "would add a spurious rising long-wavelength tail to the "
+                "total LDOS). Pass auto_enlarge=False to keep the current "
+                "cell."
+            )
+            enlarged = type(self)(  # the same structure in a larger cell
+                radius_nm=self.radius_nm,
+                gap_nm=self.gap_nm,
+                spacer_index=self.spacer_index,
+                film_nm=self.film_nm,
+                omega_ref=self.wavelength_nm,
+                units="nm",
+                material=self.material,
+                dimensions=self.dimensions,
+                resolution=self.resolution,
+                pml_nm=boundary_new,
+                padding_nm=padding_new,
+            )
+            return enlarged.purcell(
+                omega_min,
+                omega_max,
+                units=units,
+                offset_nm=offset_nm,
+                component=component,
+                **kwargs,
+            )
+
+        if cell_too_small:
+            warnings.warn(
+                f"The cell keeps only {padding_nm:.0f} nm of free space "
+                "around the particle, but the emission probe reaches "
+                f"{lambda_max_nm:.0f} nm: the total (LDOS) Purcell spectrum "
+                "will grow a spurious rising long-wavelength tail."
+            )
+        # the homogeneous reference cell of emission_setup scales with the
+        # same window
+        self.emission_lambda_max_nm = lambda_max_nm
+        return super().purcell(
+            omega_min,
+            omega_max,
+            units=units,
+            offset_nm=offset_nm,
+            component=component,
+            **kwargs,
+        )
 
     # -------------- grid-level coupling --------------
 
