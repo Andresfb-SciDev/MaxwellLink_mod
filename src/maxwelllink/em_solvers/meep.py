@@ -170,14 +170,22 @@ def _make_cylindrical_kernel_function(radius_grid, axial_grid, kernel_values):
     )
 
     def evaluate_kernel(radius, axial_offset):
-        if (
-            radius < radius_grid[0]
-            or radius > radius_grid[-1]
-            or axial_offset < axial_grid[0]
-            or axial_offset > axial_grid[-1]
-        ):
-            return 0.0
-        return float(spline.ev(radius, axial_offset))
+        radius, axial_offset = np.broadcast_arrays(
+            np.asarray(radius, dtype=float),
+            np.asarray(axial_offset, dtype=float),
+        )
+        radius_flat = radius.ravel()
+        axial_flat = axial_offset.ravel()
+        values = np.zeros(radius_flat.shape, dtype=float)
+        inside = (
+            (radius_flat >= radius_grid[0])
+            & (radius_flat <= radius_grid[-1])
+            & (axial_flat >= axial_grid[0])
+            & (axial_flat <= axial_grid[-1])
+        )
+        values[inside] = spline.ev(radius_flat[inside], axial_flat[inside])
+        values = values.reshape(radius.shape)
+        return values.item() if values.ndim == 0 else values
 
     return evaluate_kernel
 

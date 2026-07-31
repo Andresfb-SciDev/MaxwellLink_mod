@@ -113,7 +113,7 @@ class NPoM(DummyCavity):
             Units of ``omega_ref``: "cm-1", "eV", "au", "nm", or "um".
         material : mp.Medium or None, optional
             Material of the particle and the mirror. Default: gold
-            (``meep.materials.Au_JC_visible``).
+            (``meep.materials.Au``).
         dimensions : int, default: mxl.CYLINDRICAL
             ``mxl.CYLINDRICAL`` for the (r, z) half plane, where the cavity
             sets ``m = 0`` (the sector holding the gap mode), or 3 for full
@@ -136,7 +136,7 @@ class NPoM(DummyCavity):
         measurements over a wide wavelength range, especially for cylindrical cells.
 
         # TOY MODEL RUNNING IN LOCAL MACHINES:
-        20-radius nm and 1 nm gap particle, 500-900 nm measurement window:
+        20-radius nm and 1 nm gap particle, 500-800 nm measurement window:
         ``NPoM(padding_nm=150.0, pml_nm=250.0)``, resolution 1000.
 
         # PRACTICAL CALCULATIONS FOR NATURE 2016 PAPER:
@@ -179,9 +179,8 @@ class NPoM(DummyCavity):
 
         is_default_gold = material is None
         if is_default_gold:
-            from meep.materials import Au_JC_visible  # 1-um units: compatible directly
-
-            material = Au_JC_visible
+            from meep.materials import Au
+            material = Au
         self.material = material
 
         # -------------- the stack along z (Meep units: um) --------------
