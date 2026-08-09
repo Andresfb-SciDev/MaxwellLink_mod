@@ -445,23 +445,38 @@ class MeepScatteringSpectroscopy(MeepCavityMeasurement):
 
         The stored incident fields are subtracted at the collection surface
         (scattered power only); the closed box keeps the total fields (for
-        the absorbed power).
+        the absorbed power). The total intensity ``|E|^2`` at the hotspot is
+        recorded for the field-enhancement spectrum.
         """
 
         sim = self._signal_simulation()
         scattered, box = self._add_monitors(sim)
+        component = self.setup["component"]
+        norm = self.setup["normalization"]
+        probe = sim.add_dft_fields(
+            [component], self.freqs, center=norm["center"], size=norm["size"]
+        )
         self._subtract_incident(sim, scattered)
         self._run_until_done(sim)
 
+        internal = np.array(
+            [
+                np.mean(np.abs(sim.get_dft_array(probe, component, i)) ** 2)
+                for i in range(self.nfreq)
+            ]
+        )
         return {
             "scattered": np.array(mp.get_fluxes(scattered)),
             "box_flux": np.array(mp.get_fluxes(box)),
+            "internal": internal,
         }
 
     def postprocess(self, reference, signals):
         """
         Combine the two runs into the scattering, absorption, and extinction
-        spectra, all divided by the incident intensity at the hotspot.
+        spectra, all divided by the incident intensity at the hotspot, plus
+        the field-enhancement spectrum ``enhancement = |E|^2 / |E_inc|^2`` at
+        the hotspot (the sharpest signature of a high-Q resonance).
         """
 
         freqs = reference["frequency_meep"]
@@ -475,6 +490,7 @@ class MeepScatteringSpectroscopy(MeepCavityMeasurement):
             scattering=scattering,
             absorption=absorption,
             extinction=scattering + absorption,
+            enhancement=signals["internal"] / incident,
         )
 
 

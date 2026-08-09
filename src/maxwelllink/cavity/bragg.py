@@ -169,8 +169,12 @@ class BraggResonator(DummyCavity):
             self.core_radius = r_core
             indexes = np.array([self.n_defect] + [self.n_hi, self.n_lo] * self.n_pairs)
             thicknesses = np.array([r_core] + [t_hi, t_lo] * self.n_pairs)
-            # extend the outermost (low-index) shell through the PML
-            thicknesses[-1] += pml
+            # the mirror proper ends here; the outermost (low-index) shell
+            # continues through one wavelength of radial clearance (hosting
+            # the ring source and collection surface of the scattering
+            # probe) and through the PML
+            self.mirror_outer_radius = float(np.sum(thicknesses))
+            thicknesses[-1] += lam + pml
             # the stack grows outward from the axis at r = 0
             centers = np.cumsum(thicknesses) - 0.5 * thicknesses
         else:
@@ -334,25 +338,79 @@ class BraggResonator(DummyCavity):
 
     def optical_setup(self):
         """
-        Optical setup of the Bragg cavity: the generic transmission planes of
+        Optical setup of the Bragg cavity.
+
+        Planar mirrors use the generic transmission planes of
         ``DummyCavity.optical_setup``.
 
-        The reference structure is replaced by a homogeneous ``n_lo`` medium
-        (for the default ``n_lo = 1``: vacuum).
+        Cylindrical (ring) mirrors use the dark-field-type scattering probe
+        (cf. ``NPoM.optical_setup``): an incoming cylindrical wave
+        from a ring source in the radial clearance outside the mirrors
+        drives the m = 0 mode.
 
-        Raises
-        ------
-        NotImplementedError
-            For cylindrical (ring) mirrors, which have no plane-wave
-            transmission geometry; use ``purcell`` instead.
+        In both cases the reference structure is a homogeneous ``n_lo``
+        medium (for the default ``n_lo = 1``: vacuum).
         """
 
         if self.mirror_shape == "cylindrical":
-            raise NotImplementedError(
-                "The plane-wave transmission probe is not defined for "
-                "cylindrical (ring) mirrors: characterize the cavity with "
-                "purcell() instead, or rebuild it with mirror_shape='planar'."
-            )
+            lam = self.nm_to_meep(self.wavelength_nm)
+            pml = self.pml_thickness
+            margin = 2.0 / self.resolution  # two grid points off the PML
+            z_box = 0.5 * self.cell_size.z - pml - margin
+            # the collection box sits at the inner edge of the clearance and
+            # the ring source between the box and the radial PML
+            r_wall = self.mirror_outer_radius + 0.25 * lam
+            r_source = self.mirror_outer_radius + 0.6 * lam
+            surface = [
+                mp.FluxRegion(  # the lid, the floor, and the outer wall
+                    center=mp.Vector3(0.5 * r_wall, 0.0, z_box),
+                    size=mp.Vector3(r_wall, 0.0, 0.0),
+                    direction=mp.Z,
+                    weight=+1.0,
+                ),
+                mp.FluxRegion(
+                    center=mp.Vector3(0.5 * r_wall, 0.0, -z_box),
+                    size=mp.Vector3(r_wall, 0.0, 0.0),
+                    direction=mp.Z,
+                    weight=-1.0,
+                ),
+                mp.FluxRegion(
+                    center=mp.Vector3(r_wall, 0.0, 0.0),
+                    size=mp.Vector3(0.0, 0.0, 2.0 * z_box),
+                    direction=mp.R,
+                    weight=+1.0,
+                ),
+            ]
+            return {
+                "probe": "scattering",
+                "excitation": {
+                    "center": mp.Vector3(r_source, 0.0, 0.0),
+                    "size": mp.Vector3(0.0, 0.0, 2.0 * z_box),
+                },
+                "component": mp.Ez,
+                "detectors": {
+                    # the collection surface is already a closed box, so it
+                    # doubles as the absorption box (separate monitors: only
+                    # the scattered one is incident-subtracted)
+                    "scattered": surface,
+                    "absorption_box": list(surface),
+                },
+                # |E_inc|^2 over a short r-line at the core center (zero-size
+                # DFT monitors are unreliable in cylindrical cells)
+                "normalization": {
+                    "center": self.hotspot_center,
+                    "size": mp.Vector3(2.0 / self.resolution, 0.0, 0.0),
+                },
+                "reference_geometry": [
+                    mp.Block(
+                        size=mp.Vector3(mp.inf, mp.inf, mp.inf),
+                        material=mp.Medium(index=self.n_lo),
+                    )
+                ],
+                # watch the ringdown of the stored mode at the core center
+                "decay_monitor": self.hotspot_center,
+            }
+
         setup = super().optical_setup()
         setup["reference_geometry"] = [
             mp.Block(
