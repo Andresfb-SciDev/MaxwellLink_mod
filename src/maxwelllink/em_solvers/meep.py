@@ -697,7 +697,7 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
                 # An x dipole regularized by the isotropic Gaussian density
                 # mu * g(r) is exactly one |m|=1 sector with coefficients
                 # Pr = G/2 and Pphi = i*m*G/2, where G = mu * g on the (r, z)
-                # half plane. 
+                # half plane.
                 gaussian_prefactor = (
                     1.0 / (2.0 * np.pi) ** 1.5 / self.sigma**3 * self.rescaling_factor
                 )
@@ -1311,7 +1311,7 @@ class MoleculeMeepWrapper(MoleculeDummyWrapper):
         Cylindrical cells with ``azimuthal_mode`` m = +/-1 need extra attention.
         Meep evolves the complex Fourier coefficients ``E_m(r, z)`` of the
         physical field ``E(r, phi, z) = sum_m E_m(r, z) exp(i m phi)``, and
-        only the single sector m (such as m=1) is simulated. The omitted conjugate 
+        only the single sector m (such as m=1) is simulated. The omitted conjugate
         sector (such as m=-1) satisfies ``E_{-m} = E_m^*``.
 
         The couplings we need are overlaps of the Gaussian kernel g with the

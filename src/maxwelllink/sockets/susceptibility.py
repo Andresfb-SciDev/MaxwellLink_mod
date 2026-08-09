@@ -52,7 +52,6 @@ from ._meep_hub_base import (  # noqa: F401  re-exported for backward compatibil
 from .protocol import _close_socket
 from .sockets import SocketHub, _ClientState, am_master
 
-
 # ----------------------------------------------------------------------
 # Child-process entry point
 # ----------------------------------------------------------------------

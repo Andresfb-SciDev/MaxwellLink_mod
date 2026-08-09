@@ -36,7 +36,6 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-
 # ----------------------------------------------------------------------
 # Wire protocol (moved to protocol.py)
 # ----------------------------------------------------------------------

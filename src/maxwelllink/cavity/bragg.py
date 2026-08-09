@@ -40,8 +40,8 @@ class BraggResonator(DummyCavity):
       (``k_point = (0, 0, 0)``), and Meep may then use complex fields.
     - With ``dimensions=mxl.CYLINDRICAL`` the mirrors are disks stacked along
       z in the (r, z) half plane, ``transverse_size_nm`` is the cavity
-      radius (absorbing outer boundary), and ``m = 0`` is the default sector 
-      (for z-polarized molecules). Pass ``m=+1`` or ``m=-1`` to ``make_simulation`` 
+      radius (absorbing outer boundary), and ``m = 0`` is the default sector
+      (for z-polarized molecules). Pass ``m=+1`` or ``m=-1`` to ``make_simulation``
       for an on-axis Cartesian x/y-polarized molecule.
 
     Examples
