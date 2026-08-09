@@ -13,6 +13,7 @@ import warnings
 
 import numpy as np
 import meep as mp
+from scipy.special import jn_zeros
 
 from .dummy_cavity import DummyCavity, CYLINDRICAL
 
@@ -24,25 +25,12 @@ OFF_AXIS_SHIFT_PX = 1.5
 
 class BraggResonator(DummyCavity):
     """
-    A quarter-wave Bragg (DBR) cavity in 1, 2, or 3 dimensions (stack along
-    x), or in cylindrical coordinates (stack along z).
+    A quarter-wave Bragg (DBR) cavity in 1, 2, or 3 dimensions or
+    in cylindrical coordinates.
 
-    The two mirrors are quarter-wave dielectric stacks: alternating layers of
+    The mirrors are quarter-wave dielectric stacks: alternating layers of
     high (``n_hi``) and low (``n_lo``) refractive index, each one quarter of
     the design wavelength thick inside its medium.
-
-    Increasing ``n_pairs`` increases the mirror reflectivity and the quality
-    factor.
-
-    Notes
-    -----
-    - With ``transverse_boundary="periodic"`` the cell is Bloch-periodic
-      (``k_point = (0, 0, 0)``), and Meep may then use complex fields.
-    - With ``dimensions=mxl.CYLINDRICAL`` the mirrors are disks stacked along
-      z in the (r, z) half plane, ``transverse_size_nm`` is the cavity
-      radius (absorbing outer boundary), and ``m = 0`` is the default sector
-      (for z-polarized molecules). Pass ``m=+1`` or ``m=-1`` to ``make_simulation``
-      for an on-axis Cartesian x/y-polarized molecule.
 
     Examples
     --------
@@ -62,8 +50,9 @@ class BraggResonator(DummyCavity):
         n_defect: float = 1.0,
         defect_order: int = 1,
         dimensions: int = 1,
-        transverse_size_nm: float = None,
-        transverse_boundary: str = "pml",
+        mirror_shape: str = "auto",
+        lateral_size_nm: float = None,
+        lateral_boundary: str = "pml",
         resolution: float = None,
         pml_nm: float = None,
     ):
@@ -85,18 +74,27 @@ class BraggResonator(DummyCavity):
         n_defect : float, default: 1.0
             Refractive index of the defect gap between the mirrors.
         defect_order : int, default: 1
-            The gap has an optical length of ``defect_order`` half wavelengths.
+            The gap has an optical length of ``defect_order`` half
+            wavelengths; for ring mirrors, the core boundary sits at the
+            ``defect_order``-th zero of J0 instead.
         dimensions : int, default: 1
             1, 2, or 3 (layer stack along x), or ``mxl.CYLINDRICAL``
-            (layer stack along z in the (r, z) half plane; ``m = 0`` by
-            default).
-        transverse_size_nm : float or None, optional
-            Transverse extent (nm) of the allowed region in 2D/3D, or the
-            cavity radius in cylindrical cells. Default: 5 cavity
-            wavelengths. Must be omitted in 1D.
-        transverse_boundary : str, default: "pml"
+            (the (r, z) half plane; ``m = 0`` by default).
+        mirror_shape : str, default: "auto"
+            ``"planar"`` for flat mirror stacks (along x in Cartesian cells,
+            disks along z in cylindrical ones) or ``"cylindrical"`` for
+            concentric ring mirrors around the z axis (cylindrical cells
+            only). ``"auto"`` resolves to ``"cylindrical"`` for
+            ``dimensions=mxl.CYLINDRICAL`` and ``"planar"`` otherwise.
+        lateral_size_nm : float or None, optional
+            Extent (nm) of the allowed region along the directions parallel
+            to the mirrors: y (and z) in 2D/3D, the cavity radius for
+            cylindrical cells with planar (disk) mirrors, or the cell height
+            along z for ring mirrors. Default: 5 cavity wavelengths. Must be
+            omitted in 1D.
+        lateral_boundary : str, default: "pml"
             ``"periodic"`` for an infinite planar cavity (Bloch-periodic
-            boundaries) or ``"pml"`` for absorbing transverse boundaries
+            boundaries) or ``"pml"`` for absorbing lateral boundaries
             (the only option for cylindrical cells).
         resolution : float or None, optional
             Meep resolution. Default: at least 20 pixels per wavelength in the
@@ -114,15 +112,25 @@ class BraggResonator(DummyCavity):
             raise ValueError("n_pairs must be at least 1.")
         if int(defect_order) < 1:
             raise ValueError("defect_order must be a positive integer.")
-        if transverse_boundary not in ("periodic", "pml"):
-            raise ValueError("transverse_boundary must be 'periodic' or 'pml'.")
-        if int(dimensions) == 1 and transverse_size_nm is not None:
-            warnings.warn("transverse_size_nm has no meaning in a 1D cavity.")
-        if int(dimensions) == CYLINDRICAL and transverse_boundary == "periodic":
+        if mirror_shape not in ("auto", "planar", "cylindrical"):
+            raise ValueError(
+                "mirror_shape must be 'auto', 'planar', or 'cylindrical'."
+            )
+        if lateral_boundary not in ("periodic", "pml"):
+            raise ValueError("lateral_boundary must be 'periodic' or 'pml'.")
+        if int(dimensions) == 1 and lateral_size_nm is not None:
+            warnings.warn("lateral_size_nm has no meaning in a 1D cavity.")
+        if int(dimensions) == CYLINDRICAL and lateral_boundary == "periodic":
             raise ValueError(
                 "A cylindrical cell has an absorbing side boundary; use "
-                "transverse_boundary='pml'."
+                "lateral_boundary='pml'."
             )
+        if mirror_shape == "cylindrical" and int(dimensions) != CYLINDRICAL:
+            raise ValueError(
+                "mirror_shape='cylindrical' requires dimensions=mxl.CYLINDRICAL."
+            )
+        if mirror_shape == "auto":
+            mirror_shape = "cylindrical" if int(dimensions) == CYLINDRICAL else "planar"
 
         # default attributes (units, grid, hotspot, ...), overridden below
         super().__init__(omega=omega, units=units, dimensions=dimensions)
@@ -133,7 +141,8 @@ class BraggResonator(DummyCavity):
         self.n_lo = float(n_lo)
         self.n_defect = float(n_defect)
         self.defect_order = int(defect_order)
-        self.transverse_boundary = transverse_boundary
+        self.mirror_shape = mirror_shape
+        self.lateral_boundary = lateral_boundary
 
         # -------------- the quarter-wave layer stack (Meep units: um) --------------
         # quarter-wave mirror layers (n * t = lambda / 4) around a defect gap
@@ -145,28 +154,48 @@ class BraggResonator(DummyCavity):
         self.pml_thickness = self.nm_to_meep(pml_nm) if pml_nm is not None else lam
         pml = self.pml_thickness
 
-        indexes = np.array(
-            [self.n_lo, self.n_hi] * self.n_pairs
-            + [self.n_defect]
-            + [self.n_hi, self.n_lo] * self.n_pairs
-        )
-        thicknesses = np.array(
-            [t_lo, t_hi] * self.n_pairs + [t_gap] + [t_hi, t_lo] * self.n_pairs
-        )
-        # extend the outermost (low-index) layers through the PML
-        thicknesses[0] += pml
-        thicknesses[-1] += pml
-        # center the stack so that the defect gap center sits at the origin
-        length = float(np.sum(thicknesses))
-        centers = np.cumsum(thicknesses) - 0.5 * thicknesses - 0.5 * length
+        cylindrical = self.dimensions == CYLINDRICAL
+        ring_mirrors = cylindrical and self.mirror_shape == "cylindrical"
+        if ring_mirrors:
+            # ring mirrors: a defect core surrounded by concentric
+            # quarter-wave shells. The confined core field is Ez ~ J0(n k r)
+            # with a node at the mirror surface, so the requested resonance
+            # sits at the defect_order-th zero of J0; the quarter-wave shell
+            # thicknesses are asymptotically (planar-wave) correct away from
+            # the axis.
+            zeros_j0 = jn_zeros(0, self.defect_order + 1)
+            j0_defect = float(zeros_j0[self.defect_order - 1])
+            r_core = j0_defect * lam / (2.0 * np.pi * self.n_defect)
+            self.core_radius = r_core
+            indexes = np.array([self.n_defect] + [self.n_hi, self.n_lo] * self.n_pairs)
+            thicknesses = np.array([r_core] + [t_hi, t_lo] * self.n_pairs)
+            # extend the outermost (low-index) shell through the PML
+            thicknesses[-1] += pml
+            # the stack grows outward from the axis at r = 0
+            centers = np.cumsum(thicknesses) - 0.5 * thicknesses
+        else:
+            indexes = np.array(
+                [self.n_lo, self.n_hi] * self.n_pairs
+                + [self.n_defect]
+                + [self.n_hi, self.n_lo] * self.n_pairs
+            )
+            thicknesses = np.array(
+                [t_lo, t_hi] * self.n_pairs + [t_gap] + [t_hi, t_lo] * self.n_pairs
+            )
+            # extend the outermost (low-index) layers through the PML
+            thicknesses[0] += pml
+            thicknesses[-1] += pml
+            # center the stack so that the defect gap center sits at the origin
+            length = float(np.sum(thicknesses))
+            centers = np.cumsum(thicknesses) - 0.5 * thicknesses - 0.5 * length
 
         self.layer_indexes = indexes
         self.layer_thicknesses = thicknesses
         self.layer_centers = centers
-        # one block per layer, spanning the full transverse extent; the stack
-        # runs along x in Cartesian cells and along z in cylindrical ones
-        cylindrical = self.dimensions == CYLINDRICAL
-        if cylindrical:
+        # one block per layer, spanning the full extent of the other axes; the
+        # stack runs along x in Cartesian cells (and along r = x for ring
+        # mirrors), and along z for planar disk mirrors in cylindrical cells
+        if cylindrical and not ring_mirrors:
             self.geometry = [
                 mp.Block(
                     size=mp.Vector3(mp.inf, mp.inf, float(t)),
@@ -186,12 +215,35 @@ class BraggResonator(DummyCavity):
             ]
 
         # -------------- cell size and boundaries --------------
-        if cylindrical:
+        if ring_mirrors:
+            # the (r, z) half plane: concentric shells around the axis at
+            # r = 0, with PML at the outer radial edge; z is the open lateral
+            # direction, terminated by PML at both ends
+            z_size = (
+                self.nm_to_meep(lateral_size_nm)
+                if lateral_size_nm is not None
+                else 5.0 * lam
+            )
+            r_total = float(np.sum(thicknesses))
+            self.cell_size = mp.Vector3(r_total, 0.0, z_size + 2.0 * pml)
+            self.boundary_layers = [
+                mp.PML(thickness=pml, direction=mp.Z),
+                mp.PML(thickness=pml, direction=mp.R, side=mp.High),
+            ]
+            self.k_point = None
+            # the confined mode is azimuthally symmetric and z-polarized on
+            # the axis, so on-axis molecules couple in the m = 0 sector
+            self.m = 0
+            self.allowed_bounds = {
+                "x": (0.0, r_core),  # x plays the role of r
+                "z": (-0.5 * z_size, 0.5 * z_size),
+            }
+        elif cylindrical:
             # the (r, z) half plane: mirrors are disks stacked along z, and
             # r spans [0, R] with the axis at r = 0 and PML at the outer edge
             r_size = (
-                self.nm_to_meep(transverse_size_nm)
-                if transverse_size_nm is not None
+                self.nm_to_meep(lateral_size_nm)
+                if lateral_size_nm is not None
                 else 5.0 * lam
             )
             self.cell_size = mp.Vector3(r_size + pml, 0.0, length)
@@ -213,17 +265,17 @@ class BraggResonator(DummyCavity):
             self.allowed_bounds = {"x": (-0.5 * t_gap, 0.5 * t_gap)}
             self.cell_size = mp.Vector3(length, 0.0, 0.0)
             if self.dimensions > 1:
-                # transverse extent of the allowed region (default: five
+                # lateral extent of the allowed region (default: five
                 # wavelengths)
                 t_size = (
-                    self.nm_to_meep(transverse_size_nm)
-                    if transverse_size_nm is not None
+                    self.nm_to_meep(lateral_size_nm)
+                    if lateral_size_nm is not None
                     else 5.0 * lam
                 )
-                if transverse_boundary == "periodic":
+                if lateral_boundary == "periodic":
                     cell_t = t_size
                     self.k_point = mp.Vector3()  # Bloch-periodic boundaries
-                else:  # "pml": pad the cell and absorb in the transverse directions
+                else:  # "pml": pad the cell and absorb in the lateral directions
                     cell_t = t_size + 2.0 * pml
                     self.boundary_layers.append(mp.PML(thickness=pml, direction=mp.Y))
                     if self.dimensions == 3:
@@ -239,7 +291,7 @@ class BraggResonator(DummyCavity):
         # -------------- grid resolution --------------
         # default: at least 20 px per wavelength in the densest medium and
         # 8 px across the thinnest layer
-        t_min = min(t_hi, t_lo, t_gap)
+        t_min = min(t_hi, t_lo, r_core) if ring_mirrors else min(t_hi, t_lo, t_gap)
         n_max = max(self.n_hi, self.n_lo, self.n_defect)
         if resolution is not None:
             self.resolution = float(resolution)
@@ -247,14 +299,24 @@ class BraggResonator(DummyCavity):
             self.resolution = float(np.ceil(max(20.0 * n_max / lam, 8.0 / t_min)))
 
         # -------------- analytic estimates --------------
-        # textbook thin-film estimates (Macleod, Thin-Film Optical Filters)
+        # textbook thin-film estimates (Macleod, Thin-Film Optical Filters);
+        # for ring mirrors they are asymptotic planar-wave approximations
         admittance = self.n_lo * (self.n_hi / self.n_lo) ** (2 * self.n_pairs)
         reflectance = ((self.n_defect - admittance) / (self.n_defect + admittance)) ** 2
         finesse = np.pi * np.sqrt(reflectance) / (1.0 - reflectance)
-        # mirror penetration makes the effective gap hold m_eff (not
-        # defect_order) half wavelengths; then Q = m_eff * finesse
-        m_eff = self.defect_order + 1.0 / (self.n_hi - self.n_lo)
         omega_cminv = 1.0e7 / self.wavelength_nm
+        if ring_mirrors:
+            # the radial J0 standing wave holds j0/pi half cycles inside the
+            # core, plus the mirror penetration; consecutive J0 zeros set the
+            # radial free spectral range
+            m_eff = j0_defect / np.pi + 1.0 / (self.n_hi - self.n_lo)
+            j0_next = float(zeros_j0[self.defect_order])
+            fsr_cminv = omega_cminv * (j0_next - j0_defect) / j0_defect
+        else:
+            # mirror penetration makes the effective gap hold m_eff (not
+            # defect_order) half wavelengths; then Q = m_eff * finesse
+            m_eff = self.defect_order + 1.0 / (self.n_hi - self.n_lo)
+            fsr_cminv = omega_cminv / m_eff
         quality_factor = m_eff * finesse
         self.predicted = {
             "omega_cminv": omega_cminv,
@@ -262,8 +324,10 @@ class BraggResonator(DummyCavity):
             "mirror_reflectance": float(reflectance),
             "quality_factor": float(quality_factor),
             "kappa_cminv": float(omega_cminv / quality_factor),
-            "fsr_cminv": float(omega_cminv / m_eff),
+            "fsr_cminv": float(fsr_cminv),
         }
+        if ring_mirrors:
+            self.predicted["core_radius_nm"] = self.meep_to_nm(r_core)
         self._warn_if_coarse(n_max=n_max, t_min=t_min)
 
     # -------------- light-induced measurements --------------
@@ -275,8 +339,20 @@ class BraggResonator(DummyCavity):
 
         The reference structure is replaced by a homogeneous ``n_lo`` medium
         (for the default ``n_lo = 1``: vacuum).
+
+        Raises
+        ------
+        NotImplementedError
+            For cylindrical (ring) mirrors, which have no plane-wave
+            transmission geometry; use ``purcell`` instead.
         """
 
+        if self.mirror_shape == "cylindrical":
+            raise NotImplementedError(
+                "The plane-wave transmission probe is not defined for "
+                "cylindrical (ring) mirrors: characterize the cavity with "
+                "purcell() instead, or rebuild it with mirror_shape='planar'."
+            )
         setup = super().optical_setup()
         setup["reference_geometry"] = [
             mp.Block(
@@ -297,11 +373,13 @@ class BraggResonator(DummyCavity):
 
         Notes
         -----
-        Cylindrical cells default to an azimuthally symmetric (m = 0) ring of
-        radial dipole.
+        Cylindrical cells with the default ring mirrors use an on-axis
+        z-polarized dipole (m = 0), which couples to the confined Ez mode
+        and is regular on the axis.
 
-        For the m = +-1 near-axis dipole, pass ``component=mp.Er`` together
-        with ``m=1``.
+        Cylindrical cells with planar (disk) mirrors default to an
+        azimuthally symmetric (m = 0) ring of radial dipole; for the m = +-1
+        near-axis dipole, pass ``component=mp.Er`` together with ``m=1``.
 
         Parameters
         ----------
@@ -309,15 +387,20 @@ class BraggResonator(DummyCavity):
             Displacement (nm) of the dipole from the defect center.
         component : Meep field component or None, optional
             Dipole orientation. Default: ``mp.Ez`` (parallel to the mirrors)
-            in Cartesian cells, ``mp.Er`` in cylindrical ones.
+            in Cartesian cells and for cylindrical ring mirrors, ``mp.Er``
+            for cylindrical disk mirrors.
         """
 
         if self.dimensions == CYLINDRICAL:
-            # a closed box just inside the PML: the two mirror-side disks
-            # (axial) plus the outer side wall (lateral)
+            # a closed box just inside the PML: the two end disks (axial)
+            # plus the outer side wall (lateral)
             box = self._emission_box_regions()
             center = self.hotspot_center + self._offset_to_meep(offset_nm)
-            if component is None:
+            if component is None and self.mirror_shape == "cylindrical":
+                # ring mirrors confine a z-polarized (m = 0) mode on the
+                # axis, where an Ez point dipole is regular
+                component = mp.Ez
+            elif component is None:
                 component = mp.Er
                 if center.x == 0.0:
                     # the default m = 0 radial dipole is a ring one design

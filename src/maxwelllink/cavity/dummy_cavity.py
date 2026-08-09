@@ -905,8 +905,13 @@ class DummyCavity:
             f"size = {10.0 * sigma_nm:.2f} nm (10 sigma)"
         )
 
-        setup = self.optical_setup()
-        if setup["probe"] == "scattering":
+        try:
+            setup = self.optical_setup()
+        except NotImplementedError:
+            setup = None
+        if setup is None:
+            lines.append("  optical setup     : not available (see optical_setup())")
+        elif setup["probe"] == "scattering":
             # a grazing source sheet at fixed x (= r in cylindrical cells)
             source = self.meep_to_nm(setup["excitation"]["center"].x)
             detectors = ", ".join(
@@ -943,7 +948,7 @@ class DummyCavity:
         )
 
         if self.k_point is not None:
-            lines.append("  transverse boundary : periodic (k_point = (0, 0, 0))")
+            lines.append("  lateral boundary  : periodic (k_point = (0, 0, 0))")
         if self.predicted:
             lines.append("  predicted (estimates):")
             for key, value in self.predicted.items():
