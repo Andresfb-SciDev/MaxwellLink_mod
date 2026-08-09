@@ -40,9 +40,9 @@ class BraggResonator(DummyCavity):
       (``k_point = (0, 0, 0)``), and Meep may then use complex fields.
     - With ``dimensions=mxl.CYLINDRICAL`` the mirrors are disks stacked along
       z in the (r, z) half plane, ``transverse_size_nm`` is the cavity
-      radius (absorbing outer boundary), and the cavity carries only the
-      azimuthally symmetric ``m = 0`` sector: the probes are radially
-      polarized (``mp.Er``).
+      radius (absorbing outer boundary), and ``m = 0`` is the default sector 
+      (for z-polarized molecules). Pass ``m=+1`` or ``m=-1`` to ``make_simulation`` 
+      for an on-axis Cartesian x/y-polarized molecule.
 
     Examples
     --------
@@ -88,7 +88,8 @@ class BraggResonator(DummyCavity):
             The gap has an optical length of ``defect_order`` half wavelengths.
         dimensions : int, default: 1
             1, 2, or 3 (layer stack along x), or ``mxl.CYLINDRICAL``
-            (layer stack along z in the (r, z) half plane, ``m = 0``).
+            (layer stack along z in the (r, z) half plane; ``m = 0`` by
+            default).
         transverse_size_nm : float or None, optional
             Transverse extent (nm) of the allowed region in 2D/3D, or the
             cavity radius in cylindrical cells. Default: 5 cavity
@@ -199,7 +200,8 @@ class BraggResonator(DummyCavity):
                 mp.PML(thickness=pml, direction=mp.R, side=mp.High),
             ]
             self.k_point = None
-            # the fundamental gap mode is azimuthally symmetric
+            # Use the azimuthally symmetric sector unless make_simulation()
+            # receives an explicit m value.
             self.m = 0
             self.allowed_bounds = {
                 "x": (0.0, r_size),  # x plays the role of r
