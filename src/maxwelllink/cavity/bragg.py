@@ -113,9 +113,7 @@ class BraggResonator(DummyCavity):
         if int(defect_order) < 1:
             raise ValueError("defect_order must be a positive integer.")
         if mirror_shape not in ("auto", "planar", "cylindrical"):
-            raise ValueError(
-                "mirror_shape must be 'auto', 'planar', or 'cylindrical'."
-            )
+            raise ValueError("mirror_shape must be 'auto', 'planar', or 'cylindrical'.")
         if lateral_boundary not in ("periodic", "pml"):
             raise ValueError("lateral_boundary must be 'periodic' or 'pml'.")
         if int(dimensions) == 1 and lateral_size_nm is not None:
