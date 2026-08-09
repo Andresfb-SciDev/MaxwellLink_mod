@@ -184,6 +184,32 @@ def cosine_drive(
 def _get_k_order(
     cavity, k_parallel_au: Union[float, Sequence[float]], direction: str
 ) -> np.ndarray:
+    r"""
+    Convert a physical in-plane wave vector into cavity mode-index units:
+
+    .. math::
+
+        k_{\mathrm{order},i} = k_{\parallel,i} / \Delta\omega_i,
+        \qquad i \in \{x, y\}.
+
+    Parameters
+    ----------
+    cavity
+        A ``FabryPerotCavity`` instance exposing ``delta_omega_x_au``,
+        ``delta_omega_y_au``, ``n_mode_x``, and ``n_mode_y``.
+    k_parallel_au
+        Physical in-plane wave vector in atomic units; a scalar for
+        ``direction="x"``/``"y"``, a length-2 sequence for ``"xy"``.
+    direction
+        One of ``"x"``, ``"y"``, or ``"xy"``, optionally prefixed with
+        ``"+"`` or ``"-"``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Length-2 array ``[kx_order, ky_order]``; the entry along an axis
+        with zero mode spacing is zero.
+    """
     direction = str(direction).strip().lower()
     sign = 1.0
     if direction.startswith(("+", "-")):
