@@ -1,9 +1,20 @@
 Meep Socket-Susceptibility Solver
 =================================
 
+.. note::
+
+  This feature relies on a modified Meep FDTD code developed by the TEL Research Group. Users can install this modified Meep code following:
+
+  .. code-block:: bash
+
+    conda install --override-channels -c tel-research -c conda-forge "pymeep-fdtdbath * mpi_mpich_*"
+
+  This modified version supports Python `3.11`, `3.12`, and `3.13` in Linux and MacOS M1 (osx-arm64) chips. Only the MPI version is built for large-scale calculations.
+
+
 .. warning::
 
-   **Experimental feature — not yet production-ready.** This grid-level
+   **Experimental feature and not yet production-ready.** This grid-level
    coupling is under active development and requires a **locally modified Meep
    build**, `fdtdbath-meep <https://github.com/TaoELi/fdtdbath-meep>`_, rather
    than a stock ``pymeep`` installation. For production simulations, refer to the standard Meep
