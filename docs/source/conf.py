@@ -78,6 +78,9 @@ napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 napoleon_use_param = True
 napoleon_use_rtype = True
+# Render class ``Attributes`` sections as fields on the class instead of
+# creating a second indexed directive for attributes that autodoc discovers.
+napoleon_use_ivar = True
 
 
 # Theme

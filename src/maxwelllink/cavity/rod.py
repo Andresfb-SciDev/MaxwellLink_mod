@@ -556,7 +556,7 @@ class PlasmonicRod(DummyCavity):
         epsilon : float or None, optional
             Background permittivity of the molecular medium. Default:
             ``background_index ** 2``.
-        hub : SusceptibilitySocketHub or None, optional
+        hub : :class:`~maxwelllink.sockets.susceptibility.SusceptibilitySocketHub` or None, optional
             Socket hub of the grid-level route.
         width_nm : float or None, optional
             Radial annulus width. Default: ``annulus_width_nm`` from the

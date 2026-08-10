@@ -218,7 +218,7 @@ class DummyCavity:
 
         Parameters
         ----------
-        hub : SocketHub or None, optional
+        hub : :class:`~maxwelllink.sockets.sockets.SocketHub` or None, optional
             Socket hub for socket-mode molecules, exclusive with ``driver``.
         driver : str or None, optional
             Embedded driver name for non-socket molecules (e.g. ``"tls"``),
@@ -362,7 +362,7 @@ class DummyCavity:
         ----------
         epsilon : float, default: 1.0
             Background permittivity of the molecular medium.
-        hub : SusceptibilitySocketHub or None, optional
+        hub : :class:`~maxwelllink.sockets.susceptibility.SusceptibilitySocketHub` or None, optional
             Socket hub of the grid-level route.
         offset_nm : sequence of three floats, default: (0, 0, 0)
             Displacement (nm) of the region center from the hotspot.
@@ -805,7 +805,7 @@ class DummyCavity:
         ----------
         molecules : sequence of mxl.Molecule or None, optional
             Molecules to include in the simulation.
-        hub : SocketHub or None, optional
+        hub : :class:`~maxwelllink.sockets.sockets.SocketHub` or None, optional
             Socket hub shared by socket-mode molecules.
         sources : sequence or None, optional
             Additional native Meep sources (laser excitation etc.).

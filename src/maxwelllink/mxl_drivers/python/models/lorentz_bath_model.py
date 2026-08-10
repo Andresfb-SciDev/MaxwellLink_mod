@@ -37,6 +37,7 @@ class LorentzBathModel(DummyModel):
     :math:`V(q_j) = \\frac{1}{2} \\omega_j^2 q_j^2 - \\omega_j^2 \\sqrt{\\frac{\\chi}{2}} q_j^3 + \\frac{7}{12}\\omega_j^2\\chi q_j^4`,
     where :math:`\\chi` is the anharmonicity parameter of the bath.
 
+    Notes
     -----
     This model provides an alternative way to understand the interplay between polaritons and
     molecular dark modes, which should be more straightforward and cheaper to understand than directly

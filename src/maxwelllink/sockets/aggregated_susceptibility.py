@@ -1677,7 +1677,7 @@ class AggregatedSusceptibilitySocketHub(SusceptibilitySocketHub):
 
         Returns
         -------
-        list[RemoteBridgeSpec]
+        list[:class:`~maxwelllink.sockets.aggregated.RemoteBridgeSpec`]
             Always empty; the concrete bridge specs are only known later and
             are written to ``save_file`` by the child hub.
 

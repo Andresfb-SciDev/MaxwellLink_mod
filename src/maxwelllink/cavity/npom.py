@@ -612,7 +612,7 @@ class NPoM(DummyCavity):
         epsilon : float or None, optional
             Background permittivity of the molecular medium. Default: that of
             the spacer the disk replaces (``spacer_index ** 2``).
-        hub : SusceptibilitySocketHub or None, optional
+        hub : :class:`~maxwelllink.sockets.susceptibility.SusceptibilitySocketHub` or None, optional
             Socket hub of the grid-level route.
         offset_nm : sequence of three floats, default: (0, 0, 0)
             Displacement (nm) of the disk center from the hotspot.

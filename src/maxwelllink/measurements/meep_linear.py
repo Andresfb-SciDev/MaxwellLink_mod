@@ -79,7 +79,7 @@ class MeepCavityMeasurement(DummyMeasurement):
         molecules : sequence of mxl.Molecule or None, optional
             Molecules from ``place_molecule``, included in the signal run
             only (as in ``make_simulation``).
-        hub : SocketHub or None, optional
+        hub : :class:`~maxwelllink.sockets.sockets.SocketHub` or None, optional
             Socket hub shared by socket-mode molecules.
         extra_geometry : sequence, optional
             Geometry appended to the signal run only, e.g. the region from

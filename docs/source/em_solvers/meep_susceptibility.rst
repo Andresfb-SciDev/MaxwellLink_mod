@@ -1,32 +1,28 @@
 Meep Socket-Susceptibility Solver
 =================================
 
+.. warning::
+
+   **Experimental feature and not yet production-ready.** This grid-level
+   coupling is under active development. For production simulations, refer to the standard Meep
+   coupling described in :doc:`meep`.
+
+
 .. note::
 
-  This feature relies on a modified Meep FDTD code developed by the TEL Research Group. Users can install this modified Meep code following:
+  This feature relies on a modified Meep FDTD code developed by the TEL Research Group `fdtdbath-meep <https://github.com/TaoELi/fdtdbath-meep>`_. Users can install this modified Meep code following:
 
   .. code-block:: bash
 
     conda install --override-channels -c tel-research -c conda-forge "pymeep-fdtdbath * mpi_mpich_*"
 
-  This modified version supports Python `3.11`, `3.12`, and `3.13` in Linux and MacOS M1 (osx-arm64) chips. Only the MPI version is built for large-scale calculations.
+  This modified version supports Python ``3.11``, ``3.12``, and ``3.13`` in Linux and MacOS M1 (osx-arm64) chips. Only the MPI version is built for large-scale calculations.
 
 
-.. warning::
-
-   **Experimental feature and not yet production-ready.** This grid-level
-   coupling is under active development and requires a **locally modified Meep
-   build**, `fdtdbath-meep <https://github.com/TaoELi/fdtdbath-meep>`_, rather
-   than a stock ``pymeep`` installation. For production simulations, refer to the standard Meep
-   coupling described in :doc:`meep`.
-
-The socket-susceptibility backend couples **plain** `Meep <https://meep.readthedocs.io/>`_
+This feature couples **plain** `Meep <https://meep.readthedocs.io/>`_
 simulations to **MaxwellLink** molecular drivers directly at the C level of
-the FDTD time-stepping loop. A ``mp.MXLSocketSusceptibility`` object (provided
-by the modified `fdtdbath-meep <https://github.com/TaoELi/fdtdbath-meep>`_
-build) is attached to an ordinary ``mp.Medium``, whereupon **every FDTD grid
-point** covered by that medium becomes a *socket molecule* served by its own
-molecular driver through a
+the FDTD time-stepping loop. A ``mp.MXLSocketSusceptibility`` object is attached to an ordinary ``mp.Medium``, whereupon **every FDTD grid
+point** covered by that medium becomes a *socket molecule* via
 :class:`~maxwelllink.sockets.susceptibility.SusceptibilitySocketHub`.
 
 This constitutes the second of the two Meep couplings shipped with
@@ -41,7 +37,7 @@ This constitutes the second of the two Meep couplings shipped with
   **grid-level** coupling: the molecular response is incorporated directly into
   Meep's material update, assigning one driver per active grid point with no
   ``mxl.Molecule`` objects involved. This approach targets **collective strong
-  coupling of macroscopic molecular ensembles at extremely large scale**.
+  coupling of macroscopic molecular ensembles at extremely large scales**.
 
 .. note::
 
@@ -116,9 +112,7 @@ Requirements
 ------------
 
 - The modified Meep build `fdtdbath-meep
-  <https://github.com/TaoELi/fdtdbath-meep>`_ must be installed from source.
-  Because the socket client resides inside Meep's C++ FDTD core, a stock
-  ``pymeep`` package (e.g. from conda-forge) does **not** provide it. To
+  <https://github.com/TaoELi/fdtdbath-meep>`_ must be installed; see above. To
   verify a correct installation:
 
   .. code-block:: python
@@ -126,11 +120,7 @@ Requirements
      import meep as mp
      assert hasattr(mp, "MXLSocketSusceptibility")
 
-- No additional dependency is required on the **MaxwellLink** side. The hub
-  automatically launches its server in a separate child process, a design
-  necessitated by the fact that Meep's C time-stepping loop holds the Python
-  GIL while awaiting socket responses, preventing the server from running
-  within the same process.
+- No additional dependency is required on the **MaxwellLink** side. 
 - Only TCP connections are supported: the Meep C client connects by host and
   port, so UNIX domain sockets cannot be used between Meep and the hub.
 
@@ -164,7 +154,7 @@ Meep ranks and all molecular drivers directly.
    # Attach the socket susceptibility to an ordinary Meep medium.
    socket_susc = mp.MXLSocketSusceptibility(
        rescaling_factor=8.89,   # sqrt(N_phys / n_sim); see the note above
-       time_units_fs=3.33564,   # 1 Meep time unit in fs (a = 1 um here)
+       time_units_fs=3.33564,   # 1 Meep time unit in fs (unit length as 1 um here)
        hub=hub,
        real_field_only=True,
    )
@@ -203,7 +193,9 @@ Driver side
 
 Any socket-mode **MaxwellLink** driver can serve a socket molecule, including
 the Python ``mxl_driver`` models (:doc:`../drivers/index`), the LAMMPS
-``fix mxl`` client (:doc:`../drivers/lammps`), and others. Drivers connect to
+``fix mxl`` client (:doc:`../drivers/lammps`), and others. 
+
+Drivers connect to
 the hub's TCP endpoint in the same manner as in the ``SocketHub`` workflows
 (:doc:`../usage`); the only additional consideration is *how many* drivers to
 launch. The hub writes the total number of socket molecules requested by Meep
@@ -243,17 +235,13 @@ Validating against a classical Lorentzian medium
 :meth:`~maxwelllink.sockets.susceptibility.SusceptibilitySocketHub.lorentzian_conversion`
 provides a convenient route for validation by mapping a classical
 ``mp.LorentzianSusceptibility(frequency=..., sigma=...)`` onto equivalent SHO
-socket drivers. The method returns both the ``rescaling_factor`` to pass to
-``MXLSocketSusceptibility`` and a ready-to-run ``mxl_driver --model sho``
-command. This allows the socket medium to be validated against the known
-classical dispersion before committing to computationally expensive molecular
-drivers:
+socket drivers:
 
 .. code-block:: python
 
    conv = hub.lorentzian_conversion(
-       frequency=0.355,       # Lorentzian resonance (Meep units)
-       sigma=0.01,            # Lorentzian oscillator strength
+       frequency=0.355,       # Lorentzian resonance in meep units
+       sigma=0.01,            # Lorentzian oscillator strength in meep units
        resolution=125,
        dimensions=2,
        time_units_fs=3.33564,
@@ -375,4 +363,3 @@ Notes
      (``mxl.Molecule`` + ``mxl.MeepSimulation``).
    - :doc:`../drivers/index` and :doc:`../drivers/lammps` for
      molecular drivers capable of serving socket molecules.
-   - :mod:`maxwelllink.sockets.susceptibility` and

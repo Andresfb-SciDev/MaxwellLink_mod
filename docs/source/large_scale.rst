@@ -212,6 +212,7 @@ array gives one node (and one bridge ``idx``) per array task:
 .. note::
 
    The unix address in each molecular driver must be ``unix_prefix`` + ``idx`` (e.g., ``bridge_0``, ``bridge_1``, etc.) to connect to the correct bridge on the same node.
+
 **3. Submission** (dependent two-step job)
 
 .. code-block:: bash
