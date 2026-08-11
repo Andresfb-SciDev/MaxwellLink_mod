@@ -203,6 +203,9 @@ class LaserDrivenSimulation(DummyEMSimulation):
             self.drive_history = []
             self.molecule_response_history = []
 
+        # determine the output label in self.run()
+        self._tag = "LaserDriven"
+
     # ------------------------------------------------------------------
     # Core helpers
     # ------------------------------------------------------------------
@@ -415,7 +418,7 @@ class LaserDrivenSimulation(DummyEMSimulation):
                 elapsed = current_time - start_time
                 remaining = (elapsed / (idx + 1)) * (steps - (idx + 1))
                 print(
-                    f"[LaserDriven] Completed {idx + 1}/{steps} [{(idx + 1) / steps * 100:.1f}%] steps, time/step: {avg_time_per_step:.2e} seconds, remaining time: {remaining:.2f} seconds."
+                    f"[{self._tag}] Completed {idx + 1}/{steps} [{(idx + 1) / steps * 100:.1f}%] steps, time/step: {avg_time_per_step:.2e} seconds, remaining time: {remaining:.2f} seconds."
                 )
 
         # post-process the additional_data_history for each molecule before closing

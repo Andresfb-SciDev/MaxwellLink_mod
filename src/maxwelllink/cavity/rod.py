@@ -38,6 +38,9 @@ class PlasmonicRod(DummyCavity):
     """
     A gold-cylinder plasmonic cavity with a molecular side annulus.
 
+    Geometries adapted from: Brawley et al. Nat. Chem. 17, 439–447 (2025).
+    https://doi.org/10.1038/s41557-024-01723-6
+
     In 3D, one cylinder occupies a square, Bloch-periodic unit cell in the
     xy plane, with PML only along z. The cylindrical path is a rotationally
     symmetric, effective-radius approximation on the (r, z) half plane with
@@ -120,7 +123,7 @@ class PlasmonicRod(DummyCavity):
             Thickness of the bottom gold mirror.
         substrate_nm : float, default: 40.0
             Thickness of the Al2O3 layer above the mirror.
-        adhesion_nm : float, default: 0.0
+        adhesion_nm : float, default: 4.0
             Thickness of the Cr adhesion layer beneath the cylinder.
         film_nm : float, default: 200.0
             Height of the dielectric film containing the cylinder. It must be
