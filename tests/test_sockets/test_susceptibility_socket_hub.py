@@ -17,8 +17,11 @@ contract (``num_socket_molecule`` content) is asserted explicitly.
 
 from __future__ import annotations
 
+import os
 import socket
+import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -148,3 +151,51 @@ def test_unixsocket_is_rejected():
 
     with pytest.raises(ValueError):
         SusceptibilitySocketHub(unixsocket="not_supported")
+
+
+@pytest.mark.core
+def test_top_level_script_needs_no_main_guard_or_explicit_stop(tmp_path):
+    """A spawned hub must neither replay nor keep an unguarded script alive."""
+
+    marker = tmp_path / "top_level_executions.txt"
+    script = tmp_path / "unguarded_hub.py"
+    script.write_text(
+        textwrap.dedent(f"""
+            from pathlib import Path
+
+            from maxwelllink.sockets.susceptibility import SusceptibilitySocketHub
+
+
+            marker = Path({str(marker)!r})
+            with marker.open("a", encoding="utf-8") as handle:
+                handle.write("executed\\n")
+
+            hub = SusceptibilitySocketHub(
+                host="127.0.0.1",
+                port=0,
+                timeout=5.0,
+                latency=1e-3,
+                driver_count_file=None,
+            )
+            print(f"hub ready at {{hub.host}}:{{hub.port}}")
+            """),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join(
+        item for item in (str(SRC_ROOT), existing_pythonpath) if item
+    )
+    completed = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20.0,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert marker.read_text(encoding="utf-8") == "executed\n"

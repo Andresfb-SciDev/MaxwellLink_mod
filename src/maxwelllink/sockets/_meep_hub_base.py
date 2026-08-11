@@ -33,11 +33,13 @@ handshake, statistics draining, and shutdown).
 
 from __future__ import annotations
 
+import atexit
 import math
 import multiprocessing as mp
 import os
 import queue
 import socket
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -696,6 +698,7 @@ class _HubProcessProxy:
         self.latency = float(latency)
         self._stats_cache: dict[int, dict] = {}
         self._stopped = False
+        self._atexit_registered = False
         self._is_master = am_master()
         self._ready_queue = None
         self._stats_queue = None
@@ -782,9 +785,18 @@ class _HubProcessProxy:
 
             try:
                 saved_env = _strip_mpi_env_for_child_start()
+                main_module = sys.modules["__main__"]
+                old_main_file = getattr(main_module, "__file__", None)
+                old_main_spec = getattr(main_module, "__spec__", None)
                 try:
+                    # The server target lives in maxwelllink.sockets, so the
+                    # spawned child does not need to execute the user script.
+                    main_module.__file__ = None
+                    main_module.__spec__ = None
                     self._process.start()
                 finally:
+                    main_module.__file__ = old_main_file
+                    main_module.__spec__ = old_main_spec
                     _restore_env(saved_env)
                 ready = self._ready_queue.get(timeout=min(max(self.timeout, 1.0), 30.0))
             except queue.Empty:
@@ -805,6 +817,9 @@ class _HubProcessProxy:
         self.host = str(ready["host"])
         self.address = self.host
         self.port = int(ready["port"])
+        if self._is_master and not self._atexit_registered:
+            atexit.register(self.stop)
+            self._atexit_registered = True
         return ready
 
     # -------------- Lorentzian -> SHO conversion --------------
@@ -916,6 +931,10 @@ class _HubProcessProxy:
         event, joins it, and falls back to ``terminate()`` if it does not exit;
         a final stats drain captures any closing counters.
         """
+
+        if self._atexit_registered:
+            atexit.unregister(self.stop)
+            self._atexit_registered = False
 
         if self._stopped:
             return
