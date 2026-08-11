@@ -54,7 +54,7 @@ class MeepCavityMeasurement(DummyMeasurement):
         molecules=None,
         hub=None,
         extra_geometry=(),
-        decay_by=1.0e-6,
+        decay_by=1.0e-5,
         steps=None,
         max_time=1.0e4,
         min_time=0.0,
@@ -84,7 +84,7 @@ class MeepCavityMeasurement(DummyMeasurement):
         extra_geometry : sequence, optional
             Geometry appended to the signal run only, e.g. the region from
             ``place_region`` or a nanoparticle.
-        decay_by : float, default: 1e-6
+        decay_by : float, default: 1e-5
             Stop each run once the monitored fields have decayed to this
             fraction of their peak.
         steps : int or None, optional

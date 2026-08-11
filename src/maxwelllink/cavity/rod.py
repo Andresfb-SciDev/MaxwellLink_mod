@@ -22,7 +22,7 @@ LATTICE_GAP_NM = 500.0
 ROD_HEIGHT_NM = 100.0
 MIRROR_NM = 200.0
 SUBSTRATE_NM = 40.0
-ADHESION_NM = 4.0
+ADHESION_NM = 0.0  # Cr adhesion layer off by default (4 nm in literature)
 FILM_NM = 200.0
 AIR_NM = 200.0
 ANNULUS_WIDTH_NM = 50.0
@@ -120,8 +120,8 @@ class PlasmonicRod(DummyCavity):
             Thickness of the bottom gold mirror.
         substrate_nm : float, default: 40.0
             Thickness of the Al2O3 layer above the mirror.
-        adhesion_nm : float, default: 4.0
-            Thickness of the Cr layer underneath the cylinder.
+        adhesion_nm : float, default: 0.0
+            Thickness of the Cr adhesion layer beneath the cylinder. 
         film_nm : float, default: 200.0
             Height of the dielectric film containing the cylinder. It must be
             thicker than ``rod_height_nm + adhesion_nm``.
@@ -185,7 +185,6 @@ class PlasmonicRod(DummyCavity):
             "rod_height_nm": rod_height_nm,
             "mirror_nm": mirror_nm,
             "substrate_nm": substrate_nm,
-            "adhesion_nm": adhesion_nm,
             "film_nm": film_nm,
             "air_nm": air_nm,
             "annulus_width_nm": annulus_width_nm,
@@ -194,6 +193,9 @@ class PlasmonicRod(DummyCavity):
         }
         if any(float(value) <= 0.0 for value in lengths.values()):
             raise ValueError(f"All cavity lengths must be positive; got {lengths}.")
+        # The Cr adhesion layer is optional, so it may be 0, but never negative.
+        if float(adhesion_nm) < 0.0:
+            raise ValueError("adhesion_nm must be >= 0 (use 0 to remove the Cr layer).")
         if float(film_nm) <= float(rod_height_nm) + float(adhesion_nm):
             raise ValueError(
                 "film_nm must exceed rod_height_nm + adhesion_nm so the "
@@ -354,14 +356,16 @@ class PlasmonicRod(DummyCavity):
         self._background_geometry = [
             transverse_block(self.background_material, film, z_film)
         ]
+        # The gold cylinder rests on the substrate. A thin Cr adhesion layer
+        # goes between them only when its thickness is nonzero.
         self._foreground_geometry = [
             axial_cylinder(self.material, radius, rod_height, z_rod),
-            axial_cylinder(
-                self.adhesion_material,
-                radius,
-                adhesion,
-                z_adhesion,
-            ),
+        ]
+        if adhesion > 0.0:
+            self._foreground_geometry.append(
+                axial_cylinder(self.adhesion_material, radius, adhesion, z_adhesion)
+            )
+        self._foreground_geometry += [
             transverse_block(self.substrate_material, substrate, z_substrate),
             transverse_block(self.material, mirror, z_mirror),
         ]
@@ -404,9 +408,11 @@ class PlasmonicRod(DummyCavity):
                 * self.meep_to_nm(self.annulus_height)
             ),
         }
+        # adhesion can be zero and we should neglect it at this limit
+        present_layers = [t for t in (adhesion, annulus_width) if t > 0.0]
         self._warn_if_coarse(
             n_max=self.background_index,
-            t_min=min(adhesion, annulus_width),
+            t_min=min(present_layers),
         )
 
     def _validate_annulus_width(self, width):
