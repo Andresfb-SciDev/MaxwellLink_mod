@@ -62,7 +62,7 @@ class PlasmonicRod(DummyCavity):
 
     >>> from maxwelllink.cavity import PlasmonicRod
     >>> cav = PlasmonicRod()
-    >>> region = cav.place_region(hub=hub, real_field_only=True)
+    >>> region = cav.place_region(hub=hub, real_field_only=False)
     >>> sim = cav.make_simulation(hub=hub, extra_geometry=[region])
 
     Multiple localized molecules in the 3D unit cell:
