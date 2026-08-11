@@ -765,7 +765,7 @@ class PlasmonicRod(DummyCavity):
 
     # -------------- rod-specific inspection --------------
 
-    def summary(self):
+    def _summary(self):
         """Return an accurate summary of the plasmonic reflection setup."""
 
         axes = self._active_axes()
@@ -836,3 +836,8 @@ class PlasmonicRod(DummyCavity):
             "  emission/Purcell  : disabled (not physically validated)",
         ]
         return "\n".join(lines)
+
+    def summary(self):
+        """Return an accurate summary of the plasmonic reflection setup (MPI safe)"""
+        if mp.am_master():
+            print(self._summary())

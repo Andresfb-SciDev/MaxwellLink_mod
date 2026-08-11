@@ -865,7 +865,7 @@ class DummyCavity:
             for axis in self._active_axes()
         )
 
-    def summary(self):
+    def _summary(self):
         """
         Return a human-readable description of the generated setup.
         """
@@ -966,6 +966,13 @@ class DummyCavity:
                 else:
                     lines.append(f"    {key}: {value}")
         return "\n".join(lines)
+
+    def summary(self):
+        """
+            Return a human-readable description of the generated setup (MPI Safe).
+        """
+        if mp.am_master():
+            print(self._summary())
 
     def plot(self, ax=None, **kwargs):
         """
