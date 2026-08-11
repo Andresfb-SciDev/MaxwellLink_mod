@@ -10,6 +10,8 @@ MaxwellLink is a modular, open-source Python framework for self-consistent light
 
 - If you feel confused, also read `docs/source/` for the documentation of MaxwellLink as well as the source code at `src/maxwelllink/`.
 
+- Write all generated simulation and plotting scripts for senior-level undergraduates: keep the workflow short and linear, use descriptive variable names, add brief comments explaining the physics and numerical steps, and avoid unnecessary abstractions or advanced language features.
+
 ## Performing simulations: General guidelines
 
 - Once being asked to directly perform MaxwellLink simulations, first generate the proper input files with your maximal efforts following ## Preparing input files. Then, perform an independent code review of the generated input files using knowledge from `skills/`. Finally, in HPC slurm settings, add a SLRUM bash script to submit this simulation within the local subfolder of the input files; otherwise directly perform simulations locally.
