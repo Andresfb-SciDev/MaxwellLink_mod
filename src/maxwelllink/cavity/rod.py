@@ -121,7 +121,7 @@ class PlasmonicRod(DummyCavity):
         substrate_nm : float, default: 40.0
             Thickness of the Al2O3 layer above the mirror.
         adhesion_nm : float, default: 0.0
-            Thickness of the Cr adhesion layer beneath the cylinder. 
+            Thickness of the Cr adhesion layer beneath the cylinder.
         film_nm : float, default: 200.0
             Height of the dielectric film containing the cylinder. It must be
             thicker than ``rod_height_nm + adhesion_nm``.

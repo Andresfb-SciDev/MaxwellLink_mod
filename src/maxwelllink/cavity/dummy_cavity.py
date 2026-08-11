@@ -969,7 +969,7 @@ class DummyCavity:
 
     def summary(self):
         """
-            Return a human-readable description of the generated setup (MPI Safe).
+        Return a human-readable description of the generated setup (MPI Safe).
         """
         if mp.am_master():
             print(self._summary())
