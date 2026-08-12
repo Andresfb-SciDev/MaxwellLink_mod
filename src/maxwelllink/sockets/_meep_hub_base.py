@@ -270,6 +270,14 @@ def lorentzian_to_sho_parameters(
     if orientation not in (0, 1, 2):
         raise ValueError("orientation must be 0, 1, or 2.")
 
+    # help for dimension conversion
+    # 1. MEEP CYLINDRICAL COORDINATE (dimensions=-2) SHOULD USE 3D
+    if dimensions == -2:
+        dimensions = 3
+    # 2. MEEP 1D implementation is actually 2D with a single pixel in the y direction
+    if dimensions == 1:
+        dimensions = 2
+
     omega_au = 2.0 * math.pi * frequency / (time_units_fs * FS_TO_AU)
     cell_measure = (1.0 / resolution) ** int(dimensions)
     efield_factor = MEEP_EFIELD_TO_AU_PREFAC / (time_units_fs * time_units_fs)
