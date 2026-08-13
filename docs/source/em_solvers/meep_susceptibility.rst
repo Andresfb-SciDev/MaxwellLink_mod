@@ -1,5 +1,5 @@
 Meep Socket-Susceptibility Solver
-=================================
+===================================
 
 .. warning::
 
@@ -7,37 +7,9 @@ Meep Socket-Susceptibility Solver
    coupling is under active development. For production simulations, refer to the standard Meep
    coupling described in :doc:`meep`.
 
-
-.. note::
-
-  This feature relies on a modified Meep FDTD code developed by the TEL Research Group `fdtdbath-meep <https://github.com/TaoELi/fdtdbath-meep>`_. Users can install this modified Meep code following:
-
-  .. code-block:: bash
-
-    conda install --override-channels -c tel-research -c conda-forge "pymeep-fdtdbath * mpi_mpich_*"
-
-  This modified version supports Python ``3.11``, ``3.12``, and ``3.13`` in Linux and MacOS M1 (osx-arm64) chips. Only the MPI version is built for large-scale calculations.
-
-
 This feature couples **plain** `Meep <https://meep.readthedocs.io/>`_
 simulations to **MaxwellLink** molecular drivers directly at the C level of
-the FDTD time-stepping loop. A ``mp.MXLSocketSusceptibility`` object is attached to an ordinary ``mp.Medium``, whereupon **every FDTD grid
-point** covered by that medium becomes a *socket molecule* via
-:class:`~maxwelllink.sockets.susceptibility.SusceptibilitySocketHub`.
-
-This constitutes the second of the two Meep couplings shipped with
-**MaxwellLink**, complementary to :doc:`meep`:
-
-- The :doc:`meep` route (``mxl.Molecule`` + ``mxl.MeepSimulation``) provides
-  **molecule-level** coupling: each molecule acts as a point-dipole emitter whose
-  polarization density spans multiple FDTD grid points. Best suited to scenarios involving a limited number of emitters,
-  such as spontaneous emission and resonance energy transfer.
-
-- The **socket-susceptibility** route (described on this page) provides
-  **grid-level** coupling: the molecular response is incorporated directly into
-  Meep's material update, assigning one driver per active grid point with no
-  ``mxl.Molecule`` objects involved. This approach targets **collective strong
-  coupling of macroscopic molecular ensembles at extremely large scales**.
+the FDTD time-stepping loop. 
 
 .. note::
 
@@ -62,9 +34,9 @@ This constitutes the second of the two Meep couplings shipped with
   All Meep :math:`\leftrightarrow` atomic-unit conversions are handled
   internally through ``time_units_fs``. The rescaling factor :math:`\gamma`
   (``rescaling_factor``) is applied *symmetrically* to the outgoing field and
-  the returned response. 
+  the returned response, which systematically amplifies or reduces the light–matter coupling.
   
-  Thus, a driver simulating :math:`n_{\mathrm{sim}}`
+  Thus, a driver simulating :math:`N_{\mathrm{sim}}`
   molecules faithfully represents the :math:`N_{\mathrm{phys}}` physical
   molecules residing in its grid cell when
 
@@ -82,8 +54,8 @@ Comparison with the ``MeepSimulation`` route
    :header-rows: 1
 
    * -
-     - :doc:`meep` (molecule-level)
-     - Socket susceptibility (grid-level)
+     - :doc:`meep`
+     - Socket susceptibility at grid level
    * - Meep entry point
      - ``mxl.MeepSimulation`` wrapper around ``meep.Simulation``
      - Plain ``mp.Simulation`` (``fdtdbath-meep`` build)
@@ -110,6 +82,16 @@ Comparison with the ``MeepSimulation`` route
 
 Requirements
 ------------
+
+.. note::
+
+  This feature relies on a modified Meep FDTD code developed by the TEL Research Group `fdtdbath-meep <https://github.com/TaoELi/fdtdbath-meep>`_. Users can install this modified Meep code following:
+
+  .. code-block:: bash
+
+    conda install --override-channels -c tel-research -c conda-forge "pymeep-fdtdbath * mpi_mpich_*"
+
+  This modified version supports Linux and MacOS M1 (osx-arm64) chips (Python ``3.11`` to ``3.13``). Only the MPI version is built for large-scale calculations.
 
 - The modified Meep build `fdtdbath-meep
   <https://github.com/TaoELi/fdtdbath-meep>`_ must be installed; see above. To
@@ -181,10 +163,8 @@ Meep ranks and all molecular drivers directly.
        resolution=125,
    )
 
-   try:
-       sim.run(until=150)
-   finally:
-       hub.stop()
+   sim.run(until=150)
+
 
 All native Meep capabilities remain fully available.
 
@@ -192,13 +172,16 @@ Driver side
 ^^^^^^^^^^^
 
 Any socket-mode **MaxwellLink** driver can serve a socket molecule, including
-the Python ``mxl_driver`` models (:doc:`../drivers/index`), the LAMMPS
-``fix mxl`` client (:doc:`../drivers/lammps`), and others. 
+the Python ``mxl_driver`` models (:doc:`../drivers/index`), third-party drivers such as
+the LAMMPS with ``fix mxl``  (:doc:`../drivers/lammps`). 
 
 Drivers connect to
 the hub's TCP endpoint in the same manner as in the ``SocketHub`` workflows
 (:doc:`../usage`); the only additional consideration is *how many* drivers to
-launch. The hub writes the total number of socket molecules requested by Meep
+launch. 
+
+As the number of grid points allocated is controlled by the Meep code itself, 
+the hub writes the total number of socket molecules requested by Meep
 to ``driver_count_file`` (by default, ``num_socket_molecule``), which a SLURM
 job array can read to size itself accordingly:
 
@@ -333,29 +316,16 @@ Returned data
 Notes
 -----
 
-- The hub must be constructed **before** ``mp.Simulation`` begins execution
-  and should always be shut down afterwards via ``hub.stop()`` (use
-  ``try/finally`` as shown above). The hub's child server process does not
-  terminate on its own.
+- The hub must be constructed **before** ``mp.Simulation`` begins execution.
 - The total number of drivers equals the number of grid points within the
   socket medium (doubled in complex-field runs when ``real_field_only=False``).
-  This count can be estimated as the medium volume multiplied by
-  ``resolution**dimensions`` when initially sizing the driver job array; the
-  exact value should then be read from ``driver_count_file`` at runtime.
 - Under MPI parallelism, each Meep rank opens its own connection to the hub
-  and requests drivers only for the grid points it owns; the hub aggregates
-  the totals across ranks. MPI-launcher environment variables are stripped
-  automatically when spawning the hub's child process, so
-  ``mpirun``/``srun``-launched Meep operates without additional configuration.
-- If a driver disconnects, the corresponding FDTD step pauses until the driver
-  reconnects, following the same behavior as in the ``SocketHub`` workflows.
-  Checkpointed drivers (``checkpoint=true`` / ``restart=true``) can resume
-  transparently after interruptions.
+  and requests drivers only for the grid points it owns, so this feature is compatible with MPI.
 - Physically, each socket molecule represents *the molecular ensemble residing
   within a single FDTD grid cell*. For example, coupling bulk water
   (33.4 molecules/nm\ :sup:`3`) at an 8 nm grid spacing yields approximately
   17,000 physical water molecules per cell. Simulating 216 water molecules per
-  LAMMPS driver then requires ``rescaling_factor = sqrt(17000/216) ≈ 8.9``.
+  LAMMPS driver then requires ``rescaling_factor = sqrt(17000/216)``.
 
 .. seealso::
 

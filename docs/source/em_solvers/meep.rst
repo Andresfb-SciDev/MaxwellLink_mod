@@ -1,5 +1,5 @@
-Meep FDTD Solver
-================
+Meep FDTD Solver Coupled to Molecules
+=============================================
 
 The :mod:`maxwelllink.em_solvers.meep` backend couples **MaxwellLink** molecules to
 `Meep <https://meep.readthedocs.io/>`_ (``pymeep``) simulations. It wraps
