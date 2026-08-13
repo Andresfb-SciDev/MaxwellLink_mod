@@ -423,11 +423,11 @@ class MultiModeSimulation(DummyEMSimulation):
         shift_dipole_baseline: bool = False,
         gauge="dipole",
         cavity_geometry: Optional[object] = None,
-        excited_mode_list: Optional[list] = [],
+        excited_mode_list: Optional[list] = None,
         photon_pulse_drive: Optional[Union[float, Callable[[float], float]]] = None,
         photon_pulse_axis: str = "y",
         photon_partial_charge: float = 1.0,
-        excited_grid_list: Optional[list] = [],
+        excited_grid_list: Optional[list] = None,
         molecule_pulse_drive: Optional[Union[float, Callable[[float], float]]] = None,
         molecule_pulse_axis: str = "y",
         initializer: Optional[object] = DummyInitializer(),
@@ -464,7 +464,7 @@ class MultiModeSimulation(DummyEMSimulation):
         cavity_geometry : object, optional
             Cavity geometry object that defines the cavity mode structure and light-matter coupling. Must be an instance of a class that implements the necessary attributes and methods (e.g., ``omega_k``, ``varepsilon_k``, ``ftilde_k``, etc.) as used in the equations of motion.
         excited_mode_list : list, optional
-            List of excited cavity modes.
+            List of excited cavity modes. If None, ``photon_pulse_drive``'s member variable ``excited_mode_list`` will be used.
         photon_pulse_drive : float or callable, optional
             Constant photon pulse drive term or function ``photon_pulse_drive(t_au)``.
         photon_pulse_axis : str, default: "y"
@@ -472,7 +472,7 @@ class MultiModeSimulation(DummyEMSimulation):
         photon_partial_charge : float, default: 1.0
             Partial charge for the photon pulse (a.u.). This partial charge defines the magnitude of cavity normal modes' response to external pulses, in a manner similar to partial charges of atoms.
         excited_grid_list : list, optional
-            List of grid point indices that are excited by the molecule pulse. The excitation is applied by adding the molecule pulse drive to the effective electric field at these grid points.
+            List of grid point indices that are excited by the molecule pulse. The excitation is applied by adding the molecule pulse drive to the effective electric field at these grid points. If None, ``molecule_pulse_drive``'s member variable ``excited_grid_list`` will be used.
         molecule_pulse_drive : float or callable, optional
             Constant molecule pulse drive or function ``molecule_pulse_drive(t_au)`` that determines the strength of the molecule pulse applied to the excited grid points. The callable may return a scalar, or vector-valued fields, or a per-grid array over ``excited_grid_list``.
         molecule_pulse_axis : str, default: "y"
@@ -562,6 +562,9 @@ class MultiModeSimulation(DummyEMSimulation):
         self.has_dipole_next = False
         self.acceleration = np.zeros((self.n_mode, 3), dtype=float)
 
+        if excited_mode_list is None:
+            excited_mode_list = getattr(photon_pulse_drive, "excited_mode_list", [])
+
         if isinstance(excited_mode_list, list):
             self.excited_mode_list = excited_mode_list
         else:
@@ -575,6 +578,9 @@ class MultiModeSimulation(DummyEMSimulation):
         if isinstance(self.photon_drive, (int, float)):
             const = float(self.photon_drive)
             self.photon_drive = lambda _t, c=const: c
+
+        if excited_grid_list is None:
+            excited_grid_list = getattr(molecule_pulse_drive, "excited_grid_list", [])
 
         if isinstance(excited_grid_list, list):
             self.excited_grid_list = excited_grid_list
