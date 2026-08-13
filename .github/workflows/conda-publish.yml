@@ -118,7 +118,7 @@ jobs:
           path: ./dist
 
       - name: Publish package
-        uses: anaconda/actions/upload-package@v0
+        uses: anaconda/actions/upload-package@v0.3.1
         with:
           token: ${{ secrets.ANACONDA_ORG_TOKEN }}
           channel: ${{ vars.ANACONDA_ORG_CHANNEL }}
