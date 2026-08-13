@@ -259,3 +259,4 @@ tutorials/*cp2k*
 tutorials/12_meep_dftb.ipynb
 tutorials/12_multimode_lorentz_bath*.ipynb
 tutorials/16_cavity_linear_spectroscopy.ipynb
+docs/source/tutorials/media/
