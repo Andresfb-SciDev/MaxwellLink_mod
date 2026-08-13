@@ -6,7 +6,7 @@ package:
   version: {{ project.get("version") }}
 
 source:
-  path: ..
+  path: ../..
 
 build:
   number: 0

@@ -3,7 +3,7 @@ name: Build & Publish to Anaconda.org
 on:
   pull_request:
     paths:
-      - "conda.recipe/**"
+      - ".github/conda.recipe/**"
       - "pyproject.toml"
       - "setup.py"
       - "MANIFEST.in"
@@ -21,7 +21,7 @@ on:
     branches: [main]
     tags: ["v*"]
     paths:
-      - "conda.recipe/**"
+      - ".github/conda.recipe/**"
       - "pyproject.toml"
       - "setup.py"
       - "MANIFEST.in"
@@ -93,7 +93,7 @@ jobs:
         shell: bash -el {0}
         run: |
           conda install --yes conda-build
-          conda-build conda.recipe --output-folder ./build
+          conda-build .github/conda.recipe --output-folder ./build
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
