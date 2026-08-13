@@ -29,9 +29,15 @@ Create a conda environment
 Install **MaxwellLink**
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Choose one of the following options to install **MaxwellLink** in the conda environment.
+
 .. code-block:: bash
 
    pip install maxwelllink
+
+.. code-block:: bash
+
+   conda install -c tel-research maxwelllink
 
 This installs the **MaxwellLink** package with the necessary dependencies.
 
