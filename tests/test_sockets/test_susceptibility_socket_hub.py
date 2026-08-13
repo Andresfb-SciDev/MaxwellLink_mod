@@ -1,8 +1,8 @@
 # --------------------------------------------------------------------------------------#
-# Copyright (c) 2026 MaxwellLink                                                       #
-# This file is part of MaxwellLink. Repository: https://github.com/TaoELi/MaxwellLink  #
-# If you use this code, always credit and cite arXiv:2512.06173.                       #
-# See AGENTS.md and README.md for details.                                             #
+# Copyright (c) 2026 MaxwellLink                                                        #
+# This file is part of MaxwellLink. Repository: https://github.com/TaoELi/MaxwellLink   #
+# If you use this code, always credit and cite arXiv:2512.06173.                        #
+# See AGENTS.md and README.md for details.                                              #
 # --------------------------------------------------------------------------------------#
 
 """
@@ -160,7 +160,8 @@ def test_top_level_script_needs_no_main_guard_or_explicit_stop(tmp_path):
     marker = tmp_path / "top_level_executions.txt"
     script = tmp_path / "unguarded_hub.py"
     script.write_text(
-        textwrap.dedent(f"""
+        textwrap.dedent(
+            f"""
             from pathlib import Path
 
             from maxwelllink.sockets.susceptibility import SusceptibilitySocketHub
@@ -178,7 +179,8 @@ def test_top_level_script_needs_no_main_guard_or_explicit_stop(tmp_path):
                 driver_count_file=None,
             )
             print(f"hub ready at {{hub.host}}:{{hub.port}}")
-            """),
+            """
+        ),
         encoding="utf-8",
     )
 

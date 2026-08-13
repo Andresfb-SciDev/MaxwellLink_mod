@@ -1,3 +1,12 @@
+/* ----------------------------------------------------------------------
+   FixMaxwellLink: i-PI–compatible client that:
+   - modify dt based on MaxwellLink INIT message,
+   - receives E-field [Ex,Ey,Ez] in atomic units from a MaxwellLink SocketHub,
+   - applies F = qE to atoms, and
+   - sends back d(mu)/dt = sum_i q_i v_i and mu (all atomic units) each step.
+   Contributing author: Tao E. Li (University of Delaware)
+   --------------------------------------------------------------------- */
+
 #ifdef FIX_CLASS
 // clang-format off
 FixStyle(mxl,FixMaxwellLink);
