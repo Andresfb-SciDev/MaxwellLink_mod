@@ -17,6 +17,7 @@ DOCS_API = $(DOCS_SOURCE)/api
 doc:
 	rm -rf $(DOCS_SOURCE)/tutorials/notebook/*
 	rsync -av --exclude='README.md' --exclude='dftbplus_bomd_dipole_derivatives.ipynb' tutorials/ $(DOCS_SOURCE)/tutorials/notebook/
+	rsync -av media/ $(DOCS_SOURCE)/tutorials/media/
 	rm -rf $(DOCS_API)
 	LC_ALL=C $(SPHINXAPIDOC) -o $(DOCS_API) src/maxwelllink -f -e -M
 	LC_ALL=C $(SPHINXBUILD) -b html $(DOCS_SOURCE) $(DOCS_BUILD)
