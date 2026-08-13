@@ -93,7 +93,7 @@ jobs:
         shell: bash -el {0}
         run: |
           conda install --yes conda-build
-          conda build conda.recipe --output-folder ./build
+          conda-build conda.recipe --output-folder ./build
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
