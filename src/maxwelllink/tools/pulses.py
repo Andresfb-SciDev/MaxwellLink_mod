@@ -9,10 +9,7 @@
 Predefined laser electric-field profiles for MaxwellLink simulations.
 
 These helpers return callables ``f(t_au)`` that evaluate the electric field
-in atomic units at time ``t_au`` and can be passed directly to
-``LaserDrivenSimulation``'s ``drive`` parameter. The exception is
-:func:`k_parallel_pulse`, which builds an array-valued source for
-:class:`maxwelllink.MultiModeSimulation`.
+in atomic units at time ``t_au``. 
 """
 
 from __future__ import annotations
@@ -27,6 +24,7 @@ __all__ = [
     "gaussian_enveloped_cosine",
     "cosine_drive",
     "k_parallel_pulse",
+    "k_parallel_pulse_with_seed",
 ]
 
 
@@ -455,3 +453,230 @@ def k_parallel_pulse(
     _drive.k_order = k_order
 
     return _drive
+
+
+class KParallelPulseWithSeed:
+    """Callable k-parallel pulse to which short vortex seeds can be added."""
+
+    def __init__(self, base_pulse, cavity, projection_axis: str):
+        self.base_pulse = base_pulse
+        self.cavity = cavity
+        self.projection_axis = projection_axis
+        self.target = base_pulse.target
+
+        self._pulses = [base_pulse]
+        self._index_maps: list[np.ndarray] = []
+
+        # MultiModeSimulation reads one of these lists when it is constructed.
+        self.excited_mode_list: list[int] = []
+        self.excited_grid_list: list[int] = []
+        self._rebuild_indices()
+
+    def add_vortex_seed(
+        self,
+        charge: int,
+        omega_au: float,
+        amplitude_au: float,
+        t0_au: float,
+        sigma_au: float,
+        center: Sequence[float] = (0.5, 0.5),
+        waist: float = 0.15,
+        phase_rad: float = 0.0,
+    ) -> "KParallelPulseWithSeed":
+        r"""Add a short vortex seed and return this pulse for optional chaining.
+
+        The real-space seed has an amplitude proportional to
+        :math:`r^{|l|}e^{-r^2/2}` and a phase winding :math:`l\theta`, where
+        ``charge`` is the integer :math:`l`. Its time envelope is a Gaussian
+        centered at ``t0_au`` with standard deviation ``sigma_au``.
+
+        Call this method before starting ``MultiModeSimulation.run``.
+        """
+
+        try:
+            charge_value = float(charge)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("charge must be a nonzero integer.") from exc
+        if not charge_value.is_integer() or charge_value == 0.0:
+            raise ValueError("charge must be a nonzero integer.")
+        charge = int(charge_value)
+
+        center = np.asarray(center, dtype=float)
+        if center.shape != (2,) or not np.all(np.isfinite(center)):
+            raise ValueError("center must contain two finite values.")
+        if np.any(center < 0.0) or np.any(center > 1.0):
+            raise ValueError(
+                "center must lie inside the fractional cavity grid [0, 1]."
+            )
+
+        waist = float(waist)
+        sigma_au = float(sigma_au)
+        if not np.isfinite(waist) or waist <= 0.0:
+            raise ValueError("waist must be positive and finite.")
+        if not np.isfinite(sigma_au) or sigma_au <= 0.0:
+            raise ValueError("sigma_au must be positive and finite.")
+
+        omega_au = float(omega_au)
+        amplitude_au = float(amplitude_au)
+        t0_au = float(t0_au)
+        phase_rad = float(phase_rad)
+        if not np.all(np.isfinite([omega_au, amplitude_au, t0_au, phase_rad])):
+            raise ValueError(
+                "omega_au, amplitude_au, t0_au, and phase_rad must be finite."
+            )
+
+        grid_xy = np.asarray(self.cavity.grid_xy, dtype=float)
+        relative_xy = (grid_xy - center[None, :]) / waist
+        radius = np.hypot(relative_xy[:, 0], relative_xy[:, 1])
+        angle = np.arctan2(relative_xy[:, 1], relative_xy[:, 0])
+
+        # The amplitude is zero at the vortex core, while the phase winds by
+        # 2*pi*charge around it.
+        spatial_window = radius ** abs(charge) * np.exp(-0.5 * radius**2)
+        window_norm = float(np.max(spatial_window))
+        if window_norm <= 0.0:
+            raise ValueError("The vortex seed has zero amplitude on the cavity grid.")
+        spatial_window /= window_norm
+        spatial_phase = charge * angle
+
+        selected = np.flatnonzero(spatial_window > 1e-12)
+        selected_window = spatial_window[selected]
+        selected_phase = spatial_phase[selected]
+        source_complex = selected_window * np.exp(-1j * selected_phase)
+
+        excited_grid_list = selected.astype(int).tolist()
+        excited_mode_list: list[int] = []
+        mode_complex_amplitude = np.zeros(0, dtype=complex)
+
+        if self.target == "molecule":
+            channel_amplitude = source_complex
+        else:
+            # Project the real-space vortex pattern directly onto the cavity
+            # modes, using the same calculation as k_parallel_pulse.
+            ftilde_k = np.asarray(self.cavity.ftilde_k, dtype=float)
+            axis_index = 0 if self.projection_axis == "x" else 1
+            raw_projection = ftilde_k[:, selected, axis_index] @ source_complex
+            projection_norm = float(np.max(np.abs(raw_projection)))
+            if not np.isfinite(projection_norm) or projection_norm <= 0.0:
+                raise ValueError(
+                    "The vortex seed has zero overlap with every photon mode."
+                )
+            mode_mask = np.abs(raw_projection) > projection_norm * 1e-12
+            excited_mode_list = np.flatnonzero(mode_mask).astype(int).tolist()
+            mode_complex_amplitude = raw_projection[mode_mask] / projection_norm
+            channel_amplitude = mode_complex_amplitude
+
+        def seed(time_au: float) -> np.ndarray:
+            time = float(time_au)
+            gaussian = math.exp(-0.5 * ((time - t0_au) / sigma_au) ** 2)
+            carrier = np.exp(1j * (omega_au * time + phase_rad))
+            return amplitude_au * gaussian * np.real(carrier * channel_amplitude)
+
+        seed.target = self.target
+        seed.excited_grid_list = excited_grid_list
+        seed.excited_mode_list = excited_mode_list
+        seed.grid_xy = grid_xy[selected, :]
+        seed.spatial_window = selected_window
+        seed.spatial_phase = selected_phase
+        seed.mode_complex_amplitude = mode_complex_amplitude
+        seed.charge = charge
+        seed.center = center
+        seed.waist = waist
+        self._pulses.append(seed)
+        self._rebuild_indices()
+        return self
+
+    def _rebuild_indices(self) -> None:
+        """Build one ordered output index list shared by every stored pulse."""
+
+        # Keep both diagnostic lists consistent with k_parallel_pulse. Only
+        # one of them determines the returned array, depending on the target.
+        for public_name in ("excited_mode_list", "excited_grid_list"):
+            combined = sorted(
+                {
+                    index
+                    for pulse in self._pulses
+                    for index in getattr(pulse, public_name)
+                }
+            )
+            getattr(self, public_name)[:] = combined
+
+        if self.target == "photon":
+            index_name = "excited_mode_list"
+        else:
+            index_name = "excited_grid_list"
+
+        combined_indices = getattr(self, index_name)
+
+        output_position = {
+            index: position for position, index in enumerate(combined_indices)
+        }
+        self._index_maps = [
+            np.array(
+                [output_position[index] for index in getattr(pulse, index_name)],
+                dtype=int,
+            )
+            for pulse in self._pulses
+        ]
+
+    def __call__(self, time_au: float) -> np.ndarray:
+        """Return the real sum of the original pulse and all vortex seeds."""
+
+        if self.target == "photon":
+            output_size = len(self.excited_mode_list)
+        else:
+            output_size = len(self.excited_grid_list)
+
+        total = np.zeros(output_size, dtype=float)
+        for pulse, output_indices in zip(self._pulses, self._index_maps):
+            total[output_indices] += np.asarray(pulse(time_au), dtype=float)
+        return total
+
+    def __getattr__(self, name):
+        """Expose diagnostic attributes such as ``k_order`` from the base pulse."""
+
+        return getattr(self.base_pulse, name)
+
+
+def k_parallel_pulse_with_seed(
+    cavity,
+    envelope: Union[Callable[[float], float], float],
+    omega_au: float,
+    k_parallel_au: Union[float, Sequence[float]],
+    direction: str = "y",
+    center: Sequence[float] = (0.5, 0.5),
+    size: Sequence[float] = (0.1, 0.1),
+    amplitude_au: float = 1.0,
+    phase_rad: float = 0.0,
+    target: str = "molecule",
+    projection_axis: Union[str, None] = None,
+) -> KParallelPulseWithSeed:
+    """Build a k-parallel pulse that accepts additional vortex seeds.
+
+    This function takes the same arguments as :func:`k_parallel_pulse`. After
+    construction, call :meth:`add_vortex_seed` one or
+    more times. The returned object can then be passed directly to
+    ``MultiModeSimulation`` as its photon or molecule pulse drive.
+    """
+
+    base_pulse = k_parallel_pulse(
+        cavity=cavity,
+        envelope=envelope,
+        omega_au=omega_au,
+        k_parallel_au=k_parallel_au,
+        direction=direction,
+        center=center,
+        size=size,
+        amplitude_au=amplitude_au,
+        phase_rad=phase_rad,
+        target=target,
+        projection_axis=projection_axis,
+    )
+    projection_axis_clean = (
+        "y" if projection_axis is None else str(projection_axis).strip().lower()
+    )
+    return KParallelPulseWithSeed(
+        base_pulse=base_pulse,
+        cavity=cavity,
+        projection_axis=projection_axis_clean,
+    )
