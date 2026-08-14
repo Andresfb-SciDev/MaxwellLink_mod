@@ -9,7 +9,7 @@
 Predefined laser electric-field profiles for MaxwellLink simulations.
 
 These helpers return callables ``f(t_au)`` that evaluate the electric field
-in atomic units at time ``t_au``. 
+in atomic units at time ``t_au``.
 """
 
 from __future__ import annotations
