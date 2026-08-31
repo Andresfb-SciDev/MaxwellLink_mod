@@ -135,7 +135,11 @@ class PlasmonicRod(DummyCavity):
         air_nm : float, default: 200.0
             Vacuum height between the film and the top PML.
         annulus_width_nm : float, default: 50.0
-            Default radial width of molecular matter around the cylinder.
+            Default radial width of first molecular matter around the cylinder.
+        second_annulus_width_nm : float, default: 30.0
+            Default radial width of second molecular matter above the cylinder and besides the first molecular matter.
+        extra_height_nm : float, default: 23.0
+            Height difference between the top of the annulus and the top of the rod.
         background_index : float, default: 1.7
             Refractive index of the nonresonant film.
         omega_ref : float, default: 3550.0
@@ -240,7 +244,7 @@ class PlasmonicRod(DummyCavity):
         self.polarization = polarization
         self.source_amplitude = source_amplitude
         self.resolution = float(resolution)
-
+        
         from meep.materials import Al2O3_aniso, Au, Cr
 
         self.material = Au if material is None else material
@@ -275,7 +279,7 @@ class PlasmonicRod(DummyCavity):
 
         # Extra molecular region above the top of the gold rod
         self.extra_height = extra_height
-        
+
         # First annulus
         self.annulus_bottom_z = film_bottom
         self.annulus_top_z = rod_top + self.extra_height
@@ -291,7 +295,7 @@ class PlasmonicRod(DummyCavity):
         self.second_annulus_center_z = 0.5 * (self.second_annulus_bottom_z + self.second_annulus_top_z)
         self.second_annulus_inner_radius = (radius - second_annulus_width)
         self.second_annulus_outer_radius = radius
-        self.second_annulus_actual_width = second_annulus_width
+        self.second_annulus_actual_width = second_annulus_width #this is susceptible to modifications depending on the grid points
         if self.second_annulus_inner_radius < 0.0:
             raise ValueError(
                 "second_annulus_width_nm cannot exceed radius_nm."
