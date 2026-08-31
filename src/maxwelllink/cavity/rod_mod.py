@@ -291,7 +291,7 @@ class PlasmonicRod(DummyCavity):
         self.second_annulus_center_z = 0.5 * (self.second_annulus_bottom_z + self.second_annulus_top_z)
         self.second_annulus_inner_radius = (radius - second_annulus_width)
         self.second_annulus_outer_radius = radius
-        self.second_annulus_actual_width = (self.second_annulus_outer_radius - self.second_annulus_inner_radius)
+        self.second_annulus_actual_width = second_annulus_width
         if self.second_annulus_inner_radius < 0.0:
             raise ValueError(
                 "second_annulus_width_nm cannot exceed radius_nm."
