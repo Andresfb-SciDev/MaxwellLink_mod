@@ -38,7 +38,7 @@ SOURCE_AMPLITUDE = 1.0e2
 
 class PlasmonicRod(DummyCavity):
     """
-    A gold-cylinder plasmonic cavity with a molecular side annulus.
+    A gold-cylinder plasmonic cavity with a molecular annulus on the side and top.
 
     Geometries adapted from: Brawley et al. Nat. Chem. 17, 439–447 (2025).
     https://doi.org/10.1038/s41557-024-01723-6
@@ -244,7 +244,7 @@ class PlasmonicRod(DummyCavity):
         self.polarization = polarization
         self.source_amplitude = source_amplitude
         self.resolution = float(resolution)
-        
+
         from meep.materials import Al2O3_aniso, Au, Cr
 
         self.material = Au if material is None else material
@@ -267,11 +267,13 @@ class PlasmonicRod(DummyCavity):
         extra_height = self.nm_to_meep(self.extra_height_nm)
         top_pml = self.nm_to_meep(top_pml_nm)
         bottom_pml = self.nm_to_meep(bottom_pml_nm)
+
         self.top_pml = top_pml
         self.bottom_pml = bottom_pml
         self.pml_thickness = top_pml
         self.film_above_rod = film - rod_height - adhesion
         span_z = bottom_pml + mirror + substrate + film + air + top_pml
+
         film_top = 0.5 * span_z - top_pml - air
         film_bottom = film_top - film
         rod_bottom = film_bottom + adhesion
@@ -284,9 +286,7 @@ class PlasmonicRod(DummyCavity):
         self.annulus_bottom_z = film_bottom
         self.annulus_top_z = rod_top + self.extra_height
         self.annulus_height = self.annulus_top_z - self.annulus_bottom_z
-        self.annulus_center_z = 0.5 * (
-            self.annulus_bottom_z + self.annulus_top_z
-        )
+        self.annulus_center_z = 0.5 * (self.annulus_bottom_z + self.annulus_top_z)
 
         # Second annulus
         self.second_annulus_bottom_z = rod_top
@@ -295,10 +295,15 @@ class PlasmonicRod(DummyCavity):
         self.second_annulus_center_z = 0.5 * (self.second_annulus_bottom_z + self.second_annulus_top_z)
         self.second_annulus_inner_radius = (radius - second_annulus_width)
         self.second_annulus_outer_radius = radius
-        self.second_annulus_actual_width = second_annulus_width #this is susceptible to modifications depending on the grid points
+        self.second_annulus_width = second_annulus_width #this is susceptible to modifications depending on the grid points
         if self.second_annulus_inner_radius < 0.0:
             raise ValueError(
                 "second_annulus_width_nm cannot exceed radius_nm."
+            )
+        if float(second_annulus_width_nm) < 0.0:
+            raise ValueError(
+                "second_annulus_width_nm must be >= 0 "
+                "(use 0 to remove the second annulus)."
             )
 
         z_film = film_top - 0.5 * film
@@ -400,6 +405,9 @@ class PlasmonicRod(DummyCavity):
         self._foreground_geometry = [
             axial_cylinder(self.material, radius, rod_height, z_rod),
         ]
+        self._foreground_geometry += [
+            axial_cylinder(self.background_material, self.second_annulus_inner_radius, self.second_annulus_height, self.second_annulus_center_z)
+        ]
         if adhesion > 0.0:
             self._foreground_geometry.append(
                 axial_cylinder(self.adhesion_material, radius, adhesion, z_adhesion)
@@ -438,7 +446,7 @@ class PlasmonicRod(DummyCavity):
 
         second_inner_nm = self.meep_to_nm(self.second_annulus_inner_radius)
         second_outer_nm = self.meep_to_nm(self.second_annulus_outer_radius)
-        second_width_nm = self.meep_to_nm(self.second_annulus_actual_width)
+        second_width_nm = self.meep_to_nm(self.second_annulus_width)
         first_annulus_volume_nm3 = float(math.pi * ((self.radius_nm + self.annulus_width_nm) ** 2 - self.radius_nm**2) * self.meep_to_nm(self.annulus_height))
         second_annulus_volume_nm3 = float(math.pi * (second_outer_nm**2 - second_inner_nm**2) * self.meep_to_nm(self.second_annulus_height))
         self.predicted = {
@@ -460,7 +468,7 @@ class PlasmonicRod(DummyCavity):
             "total_annular_volume_nm3": (first_annulus_volume_nm3 + second_annulus_volume_nm3),
         }
         # adhesion can be zero and we should neglect it at this limit
-        present_layers = [t for t in (adhesion, annulus_width) if t > 0.0]
+        present_layers = [t for t in (adhesion, annulus_width, extra_height, second_annulus_width) if t > 0.0]
         self._warn_if_coarse(
             n_max=self.background_index,
             t_min=min(present_layers),
@@ -485,13 +493,8 @@ class PlasmonicRod(DummyCavity):
                 "lattice period so neighboring periodic annuli do not overlap."
             )
 
-    def _grid_point_below(self, coordinate):
-        """Return the nearest simulation-grid coordinate strictly below coordinate."""
-        grid_index = math.ceil(coordinate * self.resolution - 1.0e-12) - 1
-        return grid_index / self.resolution
-
     def _annular_box_is_inside(self, center, size):
-        """Return whether a Cartesian box lies fully in the 3D annulus."""
+        """Return whether a Cartesian box lies fully in the 3D molecular region."""
 
         half_x = 0.5 * size.x
         half_y = 0.5 * size.y
@@ -504,15 +507,20 @@ class PlasmonicRod(DummyCavity):
         )
         inner = self.nm_to_meep(self.radius_nm)
         outer = inner + self.nm_to_meep(self.annulus_width_nm)
+        second_inner = self.second_annulus_inner_radius
         low_z = center.z - 0.5 * size.z
         high_z = center.z + 0.5 * size.z
         tol = 1.0e-9
-        return (
-            inner_extent >= inner - tol
-            and outer_extent <= outer + tol
-            and low_z >= self.annulus_bottom_z - tol
-            and high_z <= self.annulus_top_z + tol
-        )
+        if (
+            outer_extent > outer + tol
+            or low_z < self.annulus_bottom_z - tol
+            or high_z > self.annulus_top_z + tol
+        ):
+            return False
+        if low_z < self.second_annulus_bottom_z - tol:
+            return inner_extent >= inner - tol
+
+        return inner_extent >= second_inner - tol
 
     # -------------- molecule-level coupling --------------
 
@@ -575,10 +583,13 @@ class PlasmonicRod(DummyCavity):
         size = mp.Vector3(extent, extent, extent)
         if not self._annular_box_is_inside(center, size):
             raise ValueError(
-                "The Molecule box must lie fully inside the annulus: radial "
-                f"range {self.radius_nm:g}.."
-                f"{self.radius_nm + self.annulus_width_nm:g} nm and axial "
-                f"range {self.meep_to_nm(self.annulus_bottom_z):.1f}.."
+                "The Molecule box must lie fully inside the molecular region: "
+                f"radial range {self.radius_nm:g}.."
+                f"{self.radius_nm + self.annulus_width_nm:g} nm beside the rod, "
+                f"and {self.meep_to_nm(self.second_annulus_inner_radius):g}.."
+                f"{self.radius_nm + self.annulus_width_nm:g} nm above the rod. "
+                f"Axial range "
+                f"{self.meep_to_nm(self.annulus_bottom_z):.1f}.."
                 f"{self.meep_to_nm(self.annulus_top_z):.1f} nm. Choose a "
                 "different hotspot/offset or reduce size_nm."
             )
@@ -605,13 +616,18 @@ class PlasmonicRod(DummyCavity):
         **susceptibility_kwargs,
     ):
         """
-        Create a continuous molecular annulus around the metal cylinder.
+        Create a continuous molecular region around and above the metal cylinder.
 
-        The annulus extends from ``radius_nm`` to
-        ``radius_nm + width_nm`` and vertically across the Cr-plus-cylinder
-        height. Pass the returned object to :meth:`make_simulation` as
-        ``extra_geometry=[region]``. The cavity inserts it before the metal
-        geometry, whose precedence carves out the inner radius exactly.
+        The first annulus extends from ``radius_nm`` to
+        ``radius_nm + width_nm`` and vertically from the bottom of the Cr layer
+        to ``extra_height_nm`` above the cylinder. The additional upper region
+        extends radially from ``radius_nm - second_annulus_width_nm`` to
+        ``radius_nm`` over ``extra_height_nm``.
+
+        Pass the returned object to :meth:`make_simulation` as
+        ``extra_geometry=[region]``. The cavity inserts it before the foreground
+        geometry, whose precedence carves out the metal cylinder and the central
+        region above it.
 
         Parameters
         ----------
@@ -621,8 +637,8 @@ class PlasmonicRod(DummyCavity):
         hub : :class:`~maxwelllink.sockets.susceptibility.SusceptibilitySocketHub` or None, optional
             Socket hub of the grid-level route.
         width_nm : float or None, optional
-            Radial annulus width. Default: ``annulus_width_nm`` from the
-            constructor.
+            Radial width of the first annulus. Default: ``annulus_width_nm`` from
+            the constructor.
         rescaling_factor : float, default: 1.0
             Rescaling factor of ``mp.MXLSocketSusceptibility``.
         **susceptibility_kwargs
@@ -632,104 +648,66 @@ class PlasmonicRod(DummyCavity):
         Returns
         -------
         mp.Block or mp.Cylinder
-            Molecular outer disk (a radial block in cylindrical coordinates,
-            a cylinder in 3D); the metal geometry carves out its center during
-            simulation assembly.
+            Molecular outer disk. The metal cylinder and upper background geometry
+            carve out its center during simulation assembly.
         """
 
-        width_nm = (self.annulus_width_nm if width_nm is None else float(width_nm))
+        width_nm = self.annulus_width_nm if width_nm is None else float(width_nm)
         width = self.nm_to_meep(width_nm)
         self._validate_annulus_width(width)
-        first_inner = self.nm_to_meep(self.radius_nm)
-        first_outer = first_inner + width
-        first_center = mp.Vector3(0.0, 0.0, self.annulus_center_z)
-        second_inner = self.second_annulus_inner_radius
-        second_outer = self.second_annulus_outer_radius
-        second_center = mp.Vector3(0.0, 0.0, self.second_annulus_center_z)
+
+        inner = self.nm_to_meep(self.radius_nm)
+        outer = inner + width
+
         if epsilon is None:
             epsilon = self.background_index**2
+
         medium = self._socket_medium(
             epsilon,
             hub,
             rescaling_factor,
             **susceptibility_kwargs,
         )
+
+        center = mp.Vector3(0.0, 0.0, self.annulus_center_z)
+
         if self.dimensions == CYLINDRICAL:
-            # First molecular outer disk
             region = mp.Block(
                 material=medium,
-                size=mp.Vector3(first_outer, 0.0, self.annulus_height),
-                center=mp.Vector3(0.5 * first_outer, 0.0, self.annulus_center_z),
-            )
-            # Carve center of first annulus
-            first_inner_cutout = mp.Block(
-                material=self.background_material,
-                size=mp.Vector3(first_inner, 0.0, self.annulus_height),
-                center=mp.Vector3(0.5 * first_inner, 0.0, self.annulus_center_z),
-            )
-            # Second molecular outer disk
-            second_region = mp.Block(
-                material=medium,
-                size=mp.Vector3(second_outer, 0.0, self.second_annulus_height),
-                center=mp.Vector3(0.5 * second_outer, 0.0, self.second_annulus_center_z),
-            )
-            second_inner_cutout = mp.Block(
-                material=self.background_material,
-                size=mp.Vector3(second_inner, 0.0, self.second_annulus_height),
-                center=mp.Vector3(0.5 * second_inner, 0.0, self.second_annulus_center_z),
+                size=mp.Vector3(outer, 0.0, self.annulus_height),
+                center=mp.Vector3(0.5 * outer, 0.0, self.annulus_center_z),
             )
         else:
             region = mp.Cylinder(
                 material=medium,
-                radius=first_outer,
+                radius=outer,
                 height=self.annulus_height,
-                center=first_center,
+                center=center,
             )
-            first_inner_cutout = mp.Cylinder(
-                material=self.background_material,
-                radius=first_inner,
-                height=self.annulus_height,
-                center=first_center,
-            )
-            second_region = mp.Cylinder(
-                material=medium,
-                radius=second_outer,
-                height=self.second_annulus_height,
-                center=second_center,
-            )
-            second_inner_cutout = mp.Cylinder(
-                material=self.background_material,
-                radius=second_inner,
-                height=self.second_annulus_height,
-                center=second_center,
-            )
+
         # sim_kwargs recognizes this marker and inserts the region before the
-        # metal cylinder, which restores the inner disk by geometry precedence.
+        # foreground geometry, which restores the inner regions by geometry precedence.
         region._maxwelllink_annular_cavity = self
-        # First annulus
-        region._maxwelllink_inner_radius = first_inner
-        region._maxwelllink_outer_radius = first_outer
+
+        # First annulus.
+        region._maxwelllink_inner_radius = inner
+        region._maxwelllink_outer_radius = outer
         region._maxwelllink_height = self.annulus_height
         region._maxwelllink_annulus_width = width
-        region._maxwelllink_inner_cutout = first_inner_cutout
-        # Second annulus
-        region._maxwelllink_second_region = second_region
-        region._maxwelllink_second_inner_cutout = second_inner_cutout
-        region._maxwelllink_second_inner_radius = second_inner
-        region._maxwelllink_second_outer_radius = second_outer
-        region._maxwelllink_second_height = (self.second_annulus_height)
+
+        # Additional molecular region above the rod.
+        region._maxwelllink_second_inner_radius = self.second_annulus_inner_radius
+        region._maxwelllink_second_outer_radius = self.second_annulus_outer_radius
+        region._maxwelllink_second_height = self.second_annulus_height
+        region._maxwelllink_second_annulus_width = self.second_annulus_width
+
         self.placed_regions.append(
             {
-                "center": first_center,
-                "size": mp.Vector3(2.0 * first_outer, 2.0 * first_outer, self.annulus_height),
+                "center": center,
+                "size": mp.Vector3(2.0 * outer, 2.0 * outer, self.annulus_height),
             }
         )
-        self.placed_regions.append(
-            {
-                "center": second_center,
-                "size": mp.Vector3(2.0 * second_outer, 2.0 * second_outer, self.second_annulus_height),
-            }
-        )
+
         return region
 
     def estimate_driver_count(self, region):
@@ -757,9 +735,12 @@ class PlasmonicRod(DummyCavity):
             n_z_1 = max(1, round(height * self.resolution))
             estimate_1 = n_r_1 * n_z_1
             # Second annulus
-            n_r_2 = max(1, round((second_outer - second_inner) * self.resolution))
-            n_z_2 = max(1, round(second_height * self.resolution))
-            estimate_2 = n_r_2 * n_z_2
+            if second_outer > second_inner and second_height > 0.0:
+                n_r_2 = max(1, round((second_outer - second_inner) * self.resolution))
+                n_z_2 = max(1, round(second_height * self.resolution))
+                estimate_2 = n_r_2 * n_z_2
+            else:
+                estimate_2 = 0
             estimate = int(estimate_1 + estimate_2)
         else:
             # First annulus
@@ -767,9 +748,12 @@ class PlasmonicRod(DummyCavity):
             n_z_1 = max(1, round(height * self.resolution))
             estimate_1 = (n_z_1 * max(1, round(cross_section_1)))
             # Second annulus
-            cross_section_2 = (math.pi * (second_outer**2 - second_inner**2) * self.resolution**2)
-            n_z_2 = max(1, round(second_height * self.resolution))
-            estimate_2 = (n_z_2 * max(1, round(cross_section_2)))
+            if second_outer > second_inner and second_height > 0.0:
+                cross_section_2 = (math.pi * (second_outer**2 - second_inner**2) * self.resolution**2)
+                n_z_2 = max(1, round(second_height * self.resolution))
+                estimate_2 = (n_z_2 * max(1, round(cross_section_2)))
+            else:
+                estimate_2 = 0
             estimate = int(estimate_1 + estimate_2)
         warnings.warn(
             f"Estimated socket-driver count = {estimate}. This is a geometric "
@@ -786,50 +770,21 @@ class PlasmonicRod(DummyCavity):
         Assemble geometry while preserving the molecular-annulus precedence.
         """
 
-        annular_geometry = []
+        annular_regions = []
         trailing_geometry = []
         for item in extra_geometry:
-
-            if getattr(
-                item,
-                "_maxwelllink_annular_cavity",
-                None,
-            ) is self:
-                annular_geometry.append(item)
-                inner_cutout = getattr(
-                    item,
-                    "_maxwelllink_inner_cutout",
-                    None,
-                )
-                if inner_cutout is not None:
-                    annular_geometry.append(inner_cutout)
-                second_region = getattr(
-                    item,
-                    "_maxwelllink_second_region",
-                    None,
-                )
-                if second_region is not None:
-                    annular_geometry.append(second_region)
-                second_inner_cutout = getattr(
-                    item,
-                    "_maxwelllink_second_inner_cutout",
-                    None,
-                )
-                if second_inner_cutout is not None:
-                    annular_geometry.append(
-                        second_inner_cutout
-                    )
+            if getattr(item, "_maxwelllink_annular_cavity", None) is self:
+                annular_regions.append(item)
             else:
                 trailing_geometry.append(item)
 
         kwargs = super().sim_kwargs()
         kwargs["geometry"] = (
             list(self._background_geometry)
-            + annular_geometry
+            + annular_regions
             + list(self._foreground_geometry)
             + trailing_geometry
         )
-
         return kwargs
 
     # -------------- linear reflection spectrum --------------
@@ -937,8 +892,7 @@ class PlasmonicRod(DummyCavity):
         size_nm = self.meep_to_nm(4.0 / self.resolution)
         second_inner_nm = self.meep_to_nm(self.second_annulus_inner_radius)
         second_outer_nm = self.meep_to_nm(self.second_annulus_outer_radius)
-        second_actual_width_nm = self.meep_to_nm(self.second_annulus_actual_width)
-        radial_gap_nm = (self.radius_nm - second_outer_nm)
+        second_actual_width_nm = self.meep_to_nm(self.second_annulus_width)
         setup = self.optical_setup()
         source_z_nm = self.meep_to_nm(setup["excitation"]["center"].z)
         monitor_z_nm = self.meep_to_nm(setup["detectors"]["reflection"]["center"].z)
@@ -989,8 +943,6 @@ class PlasmonicRod(DummyCavity):
             f"{second_outer_nm:.1f} nm, "
             f"actual width={second_actual_width_nm:.1f} nm, "
             f"height={self.meep_to_nm(self.second_annulus_height):.1f} nm",
-            f"  annulus grid gap  : {radial_gap_nm:.1f} nm "
-            f"(1 radial grid step)",
             f"  placement         : {placement}",
             f"  molecule defaults : sigma={sigma_nm:.2f} nm (1 px), "
             f"size={size_nm:.2f} nm (4 px; 3D only)",
